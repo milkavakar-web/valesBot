@@ -1,21 +1,23 @@
 """Веб-панель и API."""
 import logging
 import secrets
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, Optional
+from urllib.parse import urlsplit
 
 import ccxt.async_support as ccxt
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
-from . import config, db
-from .backtest import fetch_history, run_backtest
-from .brokers import hub
+from . import config, db, rules
+from .backtest import MAX_CANDLES, chart_data, fetch_history, run_backtest
+from .brokers import exchange_symbol, hub
 from .engine import manager
-from .strategy import (DEFAULT_PARAMS, PRESETS, TIMEFRAMES, max_margin, normalize_bot,
-                       so_deviation_pct)
+from .strategy import (DEFAULT_PARAMS, PRESETS, TF_MS, TIMEFRAMES, max_margin, normalize_bot,
+                       prepare, warmup_candles)
 from .trader import Trader
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
@@ -44,6 +46,38 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Binance bot", lifespan=lifespan, dependencies=[Depends(auth)],
               docs_url=None, redoc_url=None)
+
+def _hostname(netloc: str) -> Optional[str]:
+    try:
+        return urlsplit("//" + netloc).hostname
+    except ValueError:
+        return None
+
+
+ALLOWED_HOSTS = {"127.0.0.1", "localhost", "::1", *config.PANEL_HOSTS}
+if config.HOST not in ("0.0.0.0", "::"):
+    ALLOWED_HOSTS.add(config.HOST.lower())
+
+
+@app.middleware("http")
+async def same_site_only(request: Request, call_next):
+    """Не даёт другим сайтам, открытым в том же браузере, управлять ботами.
+
+    Host: сайт злоумышленника может направить свой домен на 127.0.0.1 (DNS rebinding),
+    тогда его запросы приходят с чужим именем в Host.
+    Origin: любой сайт может отправить POST на 127.0.0.1:8000 (CSRF), и браузер
+    подпишет такой запрос адресом этого сайта.
+    """
+    host = request.headers.get("host", "")
+    if _hostname(host) not in ALLOWED_HOSTS:
+        return JSONResponse({"detail": f"Панель открыта по адресу {host}. Откройте её через "
+                                       f"http://127.0.0.1:{config.PORT} или добавьте адрес "
+                                       f"в PANEL_HOSTS в .env"}, status_code=403)
+    if request.method not in ("GET", "HEAD"):
+        origin = request.headers.get("origin")
+        if origin is not None and origin.lower().partition("://")[2] != host.lower():
+            return JSONResponse({"detail": "Запрос с другого сайта отклонён"}, status_code=403)
+    return await call_next(request)
 
 
 @app.exception_handler(ValueError)
@@ -104,6 +138,8 @@ async def meta():
     return {
         "timeframes": TIMEFRAMES,
         "defaults": DEFAULT_PARAMS,
+        "indicators": rules.catalog_api(),  # из этого описания панель строит конструктор условий
+        "ops": [{"id": k, "name": v} for k, v in rules.OPS.items()],
         "presets": PRESETS,
         "live_allowed": config.ALLOW_LIVE,
         "has_live_keys": bool(config.BINANCE_API_KEY and config.BINANCE_API_SECRET),
@@ -132,10 +168,14 @@ async def update_bot(bot_id: int, data: Dict[str, Any]):
     if manager.is_running(bot_id):
         raise ValueError("Сначала остановите бота, потом меняйте настройки")
     bot = normalize_bot(data)
-    if old["state"].get("position") and any(
+    st = old["state"]
+    if (st.get("position") or st.get("pending")) and any(
             old[k] != bot[k] for k in ("market", "symbol", "mode")):
         raise ValueError("Пока открыта позиция, нельзя менять рынок, пару или режим")
     db.update_bot(bot_id, bot)
+    if st.get("dust") and any(old[k] != bot[k] for k in ("market", "symbol")):
+        st["dust"] = None  # остаток монет относится к старой паре
+        db.save_state(bot_id, st)
     return _view(db.get_bot(bot_id))
 
 
@@ -144,8 +184,9 @@ async def delete_bot(bot_id: int):
     bot = _bot_or_404(bot_id)
     if manager.is_running(bot_id):
         raise ValueError("Сначала остановите бота")
-    if bot["state"].get("position"):
-        raise ValueError("У бота открыта позиция: закройте её или уберите из памяти")
+    if bot["state"].get("position") or bot["state"].get("pending"):
+        raise ValueError("У бота открыта позиция или неподтверждённый ордер: "
+                         "закройте позицию или уберите её из памяти")
     db.delete_bot(bot_id)
     return {"ok": True}
 
@@ -188,14 +229,55 @@ async def trades(bot_id: Optional[int] = None, limit: int = 200):
     return db.list_trades(bot_id, min(max(limit, 1), 1000))
 
 
-# ---------- проверка на истории ----------
+# ---------- проверка на истории и графики ----------
+
+def _thousands(n: int) -> str:
+    return f"{n:,}".replace(",", "\u00a0")
+
 
 @app.post("/api/backtest")
 async def backtest(data: Dict[str, Any]):
+    """Прогон настроек бота по истории за период from–to (мс)."""
     bot = normalize_bot(data)
-    n = int(data.get("candles") or 2000)
-    n = min(max(n, 200), 10000)
-    candles = await fetch_history(bot["market"], bot["symbol"], bot["timeframe"], n)
-    result = await run_backtest(bot, candles)
-    result["deepest_so_pct"] = so_deviation_pct(bot["params"], bot["params"]["safety_orders"])
-    return result
+    p, tf = bot["params"], bot["timeframe"]
+    tf_ms = TF_MS[tf]
+    now = int(time.time() * 1000)
+    try:
+        until = min(int(data.get("to") or now), now)
+        since = int(data.get("from") or until - 90 * 86_400_000)
+    except (TypeError, ValueError):
+        raise ValueError("Период задан неверно")
+    if since >= until:
+        raise ValueError("Начало периода должно быть раньше конца")
+    n = (until - since) // tf_ms
+    if n > MAX_CANDLES:
+        raise ValueError(f"За этот период набирается {_thousands(n)} свечей {tf}, а за раз можно "
+                         f"проверить не больше {_thousands(MAX_CANDLES)}. "
+                         f"Возьмите период короче или свечи крупнее")
+    # свечи до начала периода нужны, чтобы индикатор успел «разогреться»
+    candles = await fetch_history(bot["market"], bot["symbol"], tf,
+                                  since - warmup_candles(p) * tf_ms, until)
+    start = next((i for i, c in enumerate(candles) if c[0] >= since), len(candles))
+    return await run_backtest(bot, candles, start)
+
+
+@app.get("/api/bots/{bot_id}/chart")
+async def bot_chart(bot_id: int):
+    """Последние свечи пары, индикатор бота, его сделки и уровни открытой позиции."""
+    bot = _bot_or_404(bot_id)
+    p, tf_ms = bot["params"], TF_MS[bot["timeframe"]]
+    ex = await hub.get(bot["market"], "public")
+    sym = exchange_symbol(bot["market"], bot["symbol"])
+    if sym not in ex.markets:
+        raise ValueError(f"Пары {bot['symbol']} нет на Binance")
+    ohlcv = await ex.fetch_ohlcv(sym, bot["timeframe"], limit=1000)
+    if len(ohlcv) < 2:
+        raise RuntimeError("Биржа вернула слишком мало свечей")
+    start = max(0, min(warmup_candles(p), len(ohlcv) - 300))
+    ind = prepare(ohlcv, p)
+    first = ohlcv[start][0]
+    # сделка случилась внутри свечи — на графике ставим её на время открытия этой свечи
+    events = [{"ts": t["ts"] // tf_ms * tf_ms, "price": t["price"], "action": t["action"],
+               "side": t["side"], "reason": t["reason"], "pnl": t["pnl"], "pnl_pct": None}
+              for t in reversed(db.list_trades(bot_id, 1000)) if t["ts"] >= first]
+    return {"chart": chart_data(ohlcv, ind, p, start, events), "levels": _view(bot)["levels"]}

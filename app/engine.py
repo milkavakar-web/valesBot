@@ -8,7 +8,7 @@ from typing import Any, Deque, Dict, Optional, Tuple
 
 from . import config, db
 from .brokers import ExchangeBroker, PaperBroker, exchange_symbol, hub
-from .strategy import prepare
+from .strategy import prepare, warmup_candles
 from .trader import Trader
 
 logger = logging.getLogger("bot.engine")
@@ -61,7 +61,8 @@ class Manager:
             db.add_trade(bot_id, t)
             db.save_state(bot_id, state)
 
-        trader = Trader(bot, broker, state, record, lambda m: self.log(bot_id, m))
+        trader = Trader(bot, broker, state, record, lambda m: self.log(bot_id, m),
+                        persist=lambda: db.save_state(bot_id, state))
         return trader, ex
 
     # ---------- запуск и остановка ----------
@@ -71,11 +72,22 @@ class Manager:
             if bot["enabled"]:
                 self.tasks[bot["id"]] = asyncio.create_task(self._run(bot["id"]))
 
-    async def shutdown(self) -> None:
-        for bot_id in list(self.tasks):
-            t = self.tasks.pop(bot_id)
+    async def _cancel(self, bot_id: int, t: asyncio.Task) -> None:
+        """Останавливает задачу бота только между проверками. Если прервать её посреди
+        отправки ордера, сделка пройдёт на бирже, а бот о ней не узнает."""
+        async with self.lock(bot_id):
             t.cancel()
-        await asyncio.sleep(0)
+        try:
+            await t
+        except (asyncio.CancelledError, Exception):
+            pass
+
+    async def shutdown(self) -> None:
+        # enabled в базе не трогаем: после перезапуска программы боты продолжат работу
+        tasks = list(self.tasks.items())
+        await asyncio.gather(*(self._cancel(bot_id, t) for bot_id, t in tasks if not t.done()))
+        self.tasks.clear()
+        self.traders.clear()
 
     async def start(self, bot_id: int) -> None:
         if self.is_running(bot_id):
@@ -89,15 +101,12 @@ class Manager:
 
     async def stop(self, bot_id: int) -> None:
         db.set_enabled(bot_id, False)
-        t = self.tasks.pop(bot_id, None)
-        self.traders.pop(bot_id, None)
+        t = self.tasks.get(bot_id)
         if t and not t.done():
-            t.cancel()
-            try:
-                await t
-            except (asyncio.CancelledError, Exception):
-                pass
+            await self._cancel(bot_id, t)
             self.log(bot_id, "Бот остановлен")
+        self.tasks.pop(bot_id, None)
+        self.traders.pop(bot_id, None)
 
     async def _run(self, bot_id: int, built: Optional[Tuple[Trader, Any]] = None) -> None:
         while built is None:  # после перезапуска программы — пробуем, пока не получится
@@ -138,9 +147,13 @@ class Manager:
         bot, state = trader.bot, trader.state
         sym = exchange_symbol(bot["market"], bot["symbol"])
         tf_ms = ex.parse_timeframe(bot["timeframe"]) * 1000
-        ohlcv = await ex.fetch_ohlcv(sym, bot["timeframe"], limit=500)
+        # свечей берём с запасом на «разогрев» индикатора — так сигналы совпадают с бэктестом
+        limit = min(1000, max(500, warmup_candles(trader.p) + 2))
+        ohlcv = await ex.fetch_ohlcv(sym, bot["timeframe"], limit=limit)
         if len(ohlcv) < 3:
             raise RuntimeError("Биржа вернула слишком мало свечей")
+        # сначала разбираемся с ордером, ответ на который не дошёл
+        await trader.resolve_pending()
         now = now_ms()
         # последняя свеча обычно ещё формируется — сигнал считаем только по закрытым
         closed = ohlcv if ohlcv[-1][0] + tf_ms <= now else ohlcv[:-1]
@@ -153,9 +166,8 @@ class Manager:
         last_ts = closed[-1][0]
         if state.get("last_candle_ts") != last_ts:
             state["last_candle_ts"] = last_ts  # сначала отмечаем: одна свеча — максимум одна попытка
-            closes = [float(c[4]) for c in closed]
-            ind = prepare(closes, trader.p)
-            await trader.on_candle(ind, len(closes) - 1, price, now)
+            ind = prepare(closed, trader.p)
+            await trader.on_candle(ind, len(closed) - 1, price, now)
 
         state["error"] = None
         db.save_state(bot["id"], state)
@@ -173,6 +185,7 @@ class Manager:
     async def close_position(self, bot_id: int) -> None:
         async with self.lock(bot_id):
             trader, ex = await self._trader_for(bot_id)
+            await trader.resolve_pending()
             if not trader.pos:
                 raise ValueError("Открытой позиции нет")
             bot = trader.bot
@@ -181,13 +194,16 @@ class Manager:
             db.save_state(bot_id, trader.state)
 
     async def forget_position(self, bot_id: int) -> None:
-        """Убрать позицию из памяти бота без сделки (если закрыли её сами на бирже)."""
+        """Убрать позицию и неподтверждённый ордер из памяти бота без сделки
+        (если разобрались с ними сами на бирже)."""
         async with self.lock(bot_id):
             if self.is_running(bot_id) and bot_id in self.traders:
                 state = self.traders[bot_id][0].state
             else:
                 state = db.get_bot(bot_id)["state"]
             state["position"] = None
+            state["pending"] = None
+            state["dust"] = None
             db.save_state(bot_id, state)
             self.log(bot_id, "Позиция убрана из памяти бота без сделки")
 

@@ -3,10 +3,12 @@
 Один и тот же класс работает и в живом боте, и в бэктесте — поэтому
 результаты проверки на истории соответствуют тому, что бот делает вживую.
 """
+import secrets
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, Optional
 
-from .strategy import indicator_snapshot, signal_at, so_deviation_pct
+from .strategy import (describe_signal, exit_reason, indicator_snapshot, signal_at,
+                       so_deviation_pct)
 
 
 @dataclass
@@ -14,12 +16,18 @@ class Fill:
     amount: float   # в базовой валюте (BTC и т.п.), уже за вычетом комиссии
     price: float    # средняя цена исполнения
     fee: float      # комиссия в USDT
+    unsold: float = 0.0  # продажа на споте: монеты, оставшиеся на счёте (меньше шага лота)
+
+
+class OrderStatusUnknown(RuntimeError):
+    """Ордер ушёл на биржу, но ответа нет (таймаут, обрыв связи): он мог исполниться."""
 
 
 class Trader:
     def __init__(self, bot: Dict[str, Any], broker, state: Dict[str, Any],
                  record_trade: Callable[[Dict[str, Any]], Awaitable[None]],
-                 log: Callable[[str], None]):
+                 log: Callable[[str], None],
+                 persist: Callable[[], None] = lambda: None):
         self.bot = bot
         self.p = bot["params"]
         self.market = bot["market"]
@@ -27,6 +35,7 @@ class Trader:
         self.state = state
         self.record_trade = record_trade
         self.log = log
+        self.persist = persist  # сохранить state в базу
 
     # ---------- вспомогательное ----------
 
@@ -72,12 +81,20 @@ class Trader:
         sig = signal_at(ind, i, self.p)
         self.state["last_signal"] = sig
         self.state["indicator"] = indicator_snapshot(ind, i, self.p)
+        why = describe_signal(ind, i, self.p, sig) if sig else ""
         pos = self.pos
-        if pos and sig and sig != pos["side"] and self.p["exit_on_opposite"]:
-            await self.close(price, "противоположный сигнал", ts)
-            pos = None
+        if pos:
+            side = pos["side"]
+            reason = exit_reason(ind, i, self.p, side)
+            if not reason and sig and sig != side and self.p["exit_on_opposite"]:
+                reason = f"обратный сигнал: {why}"
+            if reason:
+                await self.close(price, reason, ts)
+                pos = None
+                if sig == side:  # условия входа и выхода совпали — не заходим снова на той же свече
+                    return
         if not pos and sig and self._allowed(sig):
-            await self.open(sig, price, ts)
+            await self.open(sig, price, ts, why)
 
     async def on_price(self, price: float, ts: int, sim: bool = False) -> None:
         """Проверка стопа, усреднений и тейка. sim=True — исполнение по уровню (бэктест)."""
@@ -106,53 +123,118 @@ class Trader:
 
     # ---------- действия ----------
 
-    async def open(self, side: str, price: float, ts: int) -> None:
+    async def open(self, side: str, price: float, ts: int, reason: str = "сигнал") -> None:
         notional, margin = self._size(0)
-        fill: Fill = await self.broker.open(side, notional, price)
-        self.state["position"] = {
-            "side": side, "qty": fill.amount, "cost": fill.amount * fill.price,
-            "avg": fill.price, "first_price": fill.price, "so_filled": 0,
-            "fees": fill.fee, "margin": margin, "opened_ts": ts,
-        }
-        await self.record_trade({"ts": ts, "action": "open", "side": side, "price": fill.price,
-                                 "amount": fill.amount, "fee": fill.fee, "pnl": None,
-                                 "reason": "сигнал"})
-        self.log(f"Вход в {'лонг' if side == 'long' else 'шорт'}: "
-                 f"{fill.amount:.6g} по {fill.price:.6g}")
+        order = {"action": "open", "side": side, "margin": margin, "ts": ts, "reason": reason}
+        fill = await self._send(order, lambda cid: self.broker.open(side, notional, price, cid))
+        await self._apply(order, fill)
 
     async def add(self, k: int, price: float, ts: int) -> None:
         pos = self.pos
         notional, margin = self._size(k)
-        # Номер усреднения сохраняем до ордера: при сбое бот не купит его повторно.
+        # Номер усреднения сохраняем до ордера: если биржа его отклонит,
+        # бот не будет пытаться купить это усреднение на каждой проверке.
         pos["so_filled"] = k
-        fill: Fill = await self.broker.open(pos["side"], notional, price)
-        pos["qty"] += fill.amount
-        pos["cost"] += fill.amount * fill.price
-        pos["avg"] = pos["cost"] / pos["qty"]
-        pos["fees"] += fill.fee
-        pos["margin"] += margin
-        await self.record_trade({"ts": ts, "action": "safety", "side": pos["side"],
-                                 "price": fill.price, "amount": fill.amount, "fee": fill.fee,
-                                 "pnl": None, "reason": f"усреднение {k}"})
-        self.log(f"Усреднение {k}: {fill.amount:.6g} по {fill.price:.6g}, "
-                 f"средняя {pos['avg']:.6g}")
+        order = {"action": "safety", "side": pos["side"], "k": k, "margin": margin, "ts": ts,
+                 "reason": f"усреднение {k}"}
+        fill = await self._send(order, lambda cid: self.broker.open(pos["side"], notional, price, cid))
+        await self._apply(order, fill)
+
+    def _with_dust(self, pos: Dict[str, Any]):
+        """Объём и стоимость позиции вместе с остатком монет от прошлых продаж."""
+        dust = self.state.get("dust") or {"qty": 0.0, "cost": 0.0}
+        return pos["qty"] + dust["qty"], pos["cost"] + dust["cost"]
 
     async def close(self, price: float, reason: str, ts: int) -> None:
         pos = self.pos
-        fill: Fill = await self.broker.close(pos["side"], pos["qty"], price)
-        proceeds = fill.amount * fill.price
-        gross = proceeds - pos["cost"] if pos["side"] == "long" else pos["cost"] - proceeds
-        pnl = gross - pos["fees"] - fill.fee
-        self.state["position"] = None
-        stats = self.state.setdefault("stats", {"closed": 0, "wins": 0, "pnl": 0.0, "fees": 0.0})
-        stats["closed"] += 1
-        stats["wins"] += 1 if pnl > 0 else 0
-        stats["pnl"] += pnl
-        stats["fees"] += pos["fees"] + fill.fee
-        await self.record_trade({"ts": ts, "action": "close", "side": pos["side"],
-                                 "price": fill.price, "amount": fill.amount, "fee": fill.fee,
-                                 "pnl": pnl, "reason": reason,
-                                 "pnl_pct": pnl / pos["margin"] * 100 if pos["margin"] else None,
-                                 "opened_ts": pos["opened_ts"], "so_used": pos["so_filled"]})
-        self.log(f"Выход ({reason}): {fill.amount:.6g} по {fill.price:.6g}, "
-                 f"результат {pnl:+.2f} USDT")
+        qty, _ = self._with_dust(pos)
+        order = {"action": "close", "side": pos["side"], "ts": ts, "reason": reason}
+        fill = await self._send(order, lambda cid: self.broker.close(pos["side"], qty, price, cid))
+        await self._apply(order, fill)
+
+    # ---------- ордер «в пути» ----------
+
+    async def _send(self, order: Dict[str, Any],
+                    place: Callable[[str], Awaitable[Fill]]) -> Fill:
+        """Записывает ордер в базу как «в пути» и только потом отправляет на биржу.
+
+        Если ответ биржи потерялся или программа упала посреди отправки, запись
+        остаётся, и resolve_pending() находит ордер на бирже по его ID. Так бот не
+        откроет сделку второй раз и не забудет о купленном.
+        """
+        order["cid"] = "bb" + secrets.token_hex(10)  # Binance принимает до 36 символов
+        self.state["pending"] = order
+        self.persist()
+        try:
+            return await place(order["cid"])
+        except OrderStatusUnknown:
+            raise  # запись остаётся, ордер проверим на следующем шаге
+        except Exception:
+            self.state["pending"] = None  # биржа ордер точно не приняла
+            raise
+
+    async def resolve_pending(self) -> None:
+        """Доводит ордер, ответ на который не дошёл. Пока биржа не ответила,
+        выбрасывает исключение, и бот ничего больше не делает."""
+        order = self.state.get("pending")
+        if not order:
+            return
+        fill = await self.broker.find(order["cid"])
+        if fill is None:
+            self.state["pending"] = None
+            self.persist()
+            self.log(f"Ордер «{order['reason']}» на бирже не найден — он не прошёл")
+            return
+        self.log(f"Ордер «{order['reason']}» найден на бирже, учитываю сделку")
+        await self._apply(order, fill)
+
+    async def _apply(self, order: Dict[str, Any], fill: Fill) -> None:
+        side, ts, reason = order["side"], order["ts"], order["reason"]
+        trade = {"ts": ts, "action": order["action"], "side": side, "price": fill.price,
+                 "amount": fill.amount, "fee": fill.fee, "pnl": None, "reason": reason}
+        if order["action"] == "open":
+            self.state["position"] = {
+                "side": side, "qty": fill.amount, "cost": fill.amount * fill.price,
+                "avg": fill.price, "first_price": fill.price, "so_filled": 0,
+                "fees": fill.fee, "margin": order["margin"], "opened_ts": ts,
+            }
+            msg = (f"Вход в {'лонг' if side == 'long' else 'шорт'}: "
+                   f"{fill.amount:.6g} по {fill.price:.6g}")
+        elif order["action"] == "safety":
+            pos = self.pos
+            pos["qty"] += fill.amount
+            pos["cost"] += fill.amount * fill.price
+            pos["avg"] = pos["cost"] / pos["qty"]
+            pos["fees"] += fill.fee
+            pos["margin"] += order["margin"]
+            msg = (f"Усреднение {order['k']}: {fill.amount:.6g} по {fill.price:.6g}, "
+                   f"средняя {pos['avg']:.6g}")
+        else:
+            pos = self.pos
+            qty, cost = self._with_dust(pos)
+            # Непроданный остаток уносит свою долю стоимости в следующую сделку,
+            # вместе с которой он и продастся. Иначе каждая продажа на споте
+            # записывалась бы в минус на стоимость этого остатка.
+            left = min(fill.unsold, qty)
+            left_cost = cost * left / qty if qty else 0.0
+            self.state["dust"] = {"qty": left, "cost": left_cost} if left > 0 else None
+            proceeds = fill.amount * fill.price
+            charged = cost - left_cost
+            gross = proceeds - charged if side == "long" else charged - proceeds
+            pnl = gross - pos["fees"] - fill.fee
+            self.state["position"] = None
+            stats = self.state.setdefault("stats", {"closed": 0, "wins": 0, "pnl": 0.0, "fees": 0.0})
+            stats["closed"] += 1
+            stats["wins"] += 1 if pnl > 0 else 0
+            stats["pnl"] += pnl
+            stats["fees"] += pos["fees"] + fill.fee
+            trade.update(pnl=pnl, pnl_pct=pnl / pos["margin"] * 100 if pos["margin"] else None,
+                         opened_ts=pos["opened_ts"], so_used=pos["so_filled"], avg=pos["avg"])
+            msg = (f"Выход ({reason}): {fill.amount:.6g} по {fill.price:.6g}, "
+                   f"результат {pnl:+.2f} USDT")
+            if left > 0:
+                msg += (f". На счёте осталось {left:.6g} — меньше шага лота, "
+                        f"продам вместе со следующей сделкой")
+        self.state["pending"] = None
+        await self.record_trade(trade)  # сохраняет и state
+        self.log(msg)

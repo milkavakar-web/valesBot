@@ -17,6 +17,10 @@ PORT = int(os.getenv("PORT", "8000"))
 PANEL_USER = os.getenv("PANEL_USER", "admin")
 PANEL_PASSWORD = os.getenv("PANEL_PASSWORD", "")
 
+# Адреса, по которым открывают панель, кроме localhost и 127.0.0.1 (через запятую).
+# Запросы к панели по другим адресам отклоняются — это защита от DNS rebinding.
+PANEL_HOSTS = [h.strip().lower() for h in os.getenv("PANEL_HOSTS", "").split(",") if h.strip()]
+
 DB_PATH = os.getenv("DB_PATH", "data/bot.db")
 
 # Как часто бот проверяет цену, секунд

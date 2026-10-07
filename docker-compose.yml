@@ -2,6 +2,8 @@ services:
   bot:
     build: .
     restart: unless-stopped
+    # При остановке бот дожидается конца текущей проверки, чтобы не оборвать ордер
+    stop_grace_period: 30s
     env_file: .env
     environment:
       HOST: 0.0.0.0

@@ -8,6 +8,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&display=swap" rel="stylesheet">
+<!-- TradingView Lightweight Charts, Apache-2.0. integrity — защита от подмены файла на CDN -->
+<script async crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/lightweight-charts@5.2.1/dist/lightweight-charts.standalone.production.js" integrity="sha256-4hzFyqAibvML2FScULnvkmYV8qTua05IY1NHelX1mM8="></script>
 <style>
 :root {
   --paper: #EDF0EC;
@@ -168,19 +170,51 @@ input:focus, select:focus { border-color: var(--accent); outline: none; box-shad
 .hint { font-size: 13px; color: var(--muted); margin: 10px 0 0; }
 .hint.warn { color: var(--warn); }
 .preset-about { font-size: 13px; color: var(--muted); margin: 8px 0 0; }
-.bt { margin-top: 14px; }
-.bt-row { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; }
-.bt-row label.f { width: 190px; }
-.bt-result { margin-top: 16px; }
-.bt-lead { font-size: 15px; margin: 0 0 12px; }
-.bt-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px 14px; }
-.bt-stats span { display: block; font-size: 12px; color: var(--muted); }
-.bt-stats b { font-weight: 600; }
-.chart { position: relative; margin-top: 16px; height: 150px; border-left: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
-.chart svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
-.chart .ax { position: absolute; left: 6px; font-size: 11px; color: var(--muted); }
-.bt-trades { margin-top: 14px; font-size: 13px; }
-.bt-trades td { padding: 5px 8px; }
+
+/* ---------- конструктор условий ---------- */
+.ruleset { margin-top: 14px; padding: 10px 12px 12px; border: 1px solid var(--rule); border-radius: 10px; }
+.ruleset-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.ruleset h4 { margin: 0; font-size: 14px; font-weight: 600; }
+.rule { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; padding-top: 8px; }
+.rule .and { flex-basis: 100%; font-size: 12px; color: var(--muted); }
+.operand { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.rule select { width: auto; max-width: 100%; padding: 5px 8px; }
+.o-p { display: inline-flex; gap: 4px; align-items: center; font-size: 12px; color: var(--muted); }
+.rule input[type=number] { width: 72px; padding: 5px 7px; }
+.r-del { margin-left: auto; border: 0; background: none; color: var(--muted); font-size: 20px; line-height: 1; padding: 0 4px; cursor: pointer; }
+.r-del:hover { color: var(--loss); }
+.rule-text { font-size: 13px; margin: 10px 0 0; }
+.rule-text:empty { display: none; }
+.r-empty { margin: 8px 0 0; }
+
+/* ---------- проверка на истории и график ---------- */
+dialog.sheet { margin: 0 auto; width: min(1180px, 100vw); max-width: 100vw; height: 100%; max-height: 100%; }
+@media (min-width: 900px) { dialog.sheet { margin-top: 24px; height: calc(100% - 48px); border-radius: 12px; } }
+.drawer-head .subtle { margin: 4px 0 0; }
+.period { display: flex; gap: 10px 14px; align-items: center; flex-wrap: wrap; margin-top: 16px; }
+.period .seg { flex-wrap: wrap; }
+.period .dates { display: flex; gap: 8px; align-items: center; }
+input[type=date] { background: var(--paper); border: 1px solid var(--rule); border-radius: 7px; padding: 6px 8px; color: var(--ink); }
+.bt-lead { font-size: 16px; margin: 22px 0 0; max-width: 80ch; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 14px 20px; margin-top: 20px; }
+.tiles span { display: block; font-size: 13px; color: var(--muted); }
+.tiles b { font-size: 17px; font-weight: 600; }
+.why { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 32px; margin-top: 26px; }
+@media (max-width: 760px) { .why { grid-template-columns: 1fr; } }
+.why p { margin: 0; max-width: 60ch; }
+table.mini { width: auto; font-size: 14px; }
+table.mini td { padding: 4px 18px 4px 0; border: 0; }
+.chart-box { position: relative; margin-top: 18px; border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; background: var(--surface); }
+.chart-box .lwc { height: 560px; }
+@media (max-width: 600px) { .chart-box .lwc { height: 440px; } }
+.chart-box .legend { position: absolute; left: 10px; top: 8px; right: 76px; z-index: 3; font-size: 12.5px; line-height: 1.5; pointer-events: none; }
+.chart-box .legend > span { display: inline-block; margin-bottom: 3px; padding: 1px 7px; border-radius: 6px; background: color-mix(in srgb, var(--surface) 85%, transparent); }
+.chart-keys { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 13px; color: var(--muted); margin-top: 8px; }
+.trades-bt { margin-top: 12px; font-size: 13.5px; }
+.trades-bt tbody tr { cursor: pointer; }
+.trades-bt tbody tr:hover td, .trades-bt tr.active td { background: var(--paper); }
+.trades-bt td { vertical-align: top; }
+.trades-bt td.wrap { white-space: normal; min-width: 170px; }
 
 pre.logs { white-space: pre-wrap; font-size: 13px; line-height: 1.55; margin: 0; }
 .toast { position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--ink); color: var(--paper); padding: 10px 16px; border-radius: 9px; max-width: min(560px, 92vw); z-index: 10; display: none; }
@@ -263,19 +297,9 @@ pre.logs { white-space: pre-wrap; font-size: 13px; line-height: 1.55; margin: 0;
 
       <fieldset>
         <legend>Когда входить</legend>
-        <div class="grid">
-          <label class="f">Сигнал
-            <select name="signal">
-              <option value="rsi">RSI</option>
-              <option value="ema_cross">Пересечение EMA</option>
-              <option value="none">Без сигнала, входить сразу</option>
-            </select>
-          </label>
-          <label class="f" data-sig="rsi">Период RSI<input type="number" name="rsi_period" min="2" max="100" step="1"></label>
-          <label class="f" data-sig="rsi"><span id="rsiLowLbl">Лонг при RSI ниже</span><input type="number" name="rsi_low" min="1" max="99" step="1"></label>
-          <label class="f" data-sig="rsi"><span id="rsiHighLbl">Шорт при RSI выше</span><input type="number" name="rsi_high" min="1" max="99" step="1"></label>
-          <label class="f" data-sig="ema_cross">Быстрая EMA<input type="number" name="ema_fast" min="2" max="200" step="1"></label>
-          <label class="f" data-sig="ema_cross">Медленная EMA<input type="number" name="ema_slow" min="3" max="400" step="1"></label>
+        <div class="seg" role="radiogroup" aria-label="Как входить">
+          <label><input type="radio" name="signal" value="rules" checked>По условиям</label>
+          <label><input type="radio" name="signal" value="none">Сразу, без условий</label>
         </div>
         <div style="margin-top:14px">
           <div class="seg" role="radiogroup" aria-label="Направление">
@@ -285,6 +309,8 @@ pre.logs { white-space: pre-wrap; font-size: 13px; line-height: 1.55; margin: 0;
           </div>
         </div>
         <p class="hint" id="dirHint"></p>
+        <div id="entrySets"></div>
+        <p class="hint" id="rulesHint">Строки внутри набора соединяются через «и»: сигнал срабатывает, когда выполнены все. Условия проверяются на закрытии каждой свечи, вход — по цене открытия следующей.</p>
       </fieldset>
 
       <fieldset>
@@ -312,26 +338,16 @@ pre.logs { white-space: pre-wrap; font-size: 13px; line-height: 1.55; margin: 0;
           <label class="f">Тейк-профит, %<input type="number" name="take_profit_pct" min="0" step="any"></label>
           <label class="f">Стоп-лосс, %<input type="number" name="stop_loss_pct" min="0" step="any"></label>
         </div>
-        <label class="check"><input type="checkbox" name="exit_on_opposite">Закрывать по противоположному сигналу</label>
-        <p class="hint">Тейк и стоп считаются от средней цены входа. 0 — выключено.</p>
+        <p class="hint">Тейк и стоп считаются от средней цены входа, 0 — выключено. Позиция закрывается по тому, что сработает первым: тейк, стоп или условия выхода.</p>
+        <div id="exitSets"></div>
+        <label class="check" id="flipField"><input type="checkbox" name="exit_on_opposite">Разворачиваться: при сигнале в другую сторону закрыть позицию и открыть обратную</label>
         <p class="hint warn" id="exitWarn"></p>
       </fieldset>
 
       <fieldset>
         <legend>Проверка на истории</legend>
-        <div class="bt-row">
-          <label class="f">Сколько свечей
-            <select id="btCandles">
-              <option value="1000">1000</option>
-              <option value="3000" selected>3000</option>
-              <option value="6000">6000</option>
-              <option value="10000">10000</option>
-            </select>
-          </label>
-          <button type="button" class="btn" id="runBt">Проверить на истории</button>
-        </div>
-        <p class="hint" id="btPeriod"></p>
-        <div class="bt-result" id="btResult"></div>
+        <p class="hint" style="margin-top:0">Прогоните эти настройки по прошлым свечам: увидите каждую сделку на графике, почему бот вошёл и вышел и сколько бы заработал. Сохранять бота для этого не нужно.</p>
+        <button type="button" class="btn" id="runBt" style="margin-top:12px">Проверить на истории…</button>
       </fieldset>
     </div>
     <div class="drawer-foot">
@@ -339,6 +355,46 @@ pre.logs { white-space: pre-wrap; font-size: 13px; line-height: 1.55; margin: 0;
       <button type="submit" class="btn primary" id="saveBtn">Сохранить бота</button>
     </div>
   </form>
+</dialog>
+
+<dialog class="sheet" id="btDialog" aria-labelledby="btTitle">
+  <div class="drawer-inner">
+    <div class="drawer-head">
+      <div><h2 id="btTitle">Проверка на истории</h2><p class="subtle" id="btWhat"></p></div>
+      <button type="button" class="link" data-close>Закрыть</button>
+    </div>
+    <div class="drawer-body">
+      <div class="period">
+        <div class="seg" role="radiogroup" aria-label="Период" id="btPeriods">
+          <label><input type="radio" name="btp" value="7">Неделя</label>
+          <label><input type="radio" name="btp" value="30">Месяц</label>
+          <label><input type="radio" name="btp" value="90" checked>3 месяца</label>
+          <label><input type="radio" name="btp" value="180">Полгода</label>
+          <label><input type="radio" name="btp" value="365">Год</label>
+          <label><input type="radio" name="btp" value="custom">Свои даты</label>
+        </div>
+        <div class="dates" id="btDates" hidden>
+          <input type="date" id="btFrom" aria-label="Начало периода"> — <input type="date" id="btTo" aria-label="Конец периода">
+        </div>
+        <button type="button" class="btn primary" id="btRun">Запустить проверку</button>
+      </div>
+      <p class="hint" id="btEstimate"></p>
+      <div id="btResult"></div>
+    </div>
+  </div>
+</dialog>
+
+<dialog class="sheet" id="chartDialog" aria-labelledby="chartTitle">
+  <div class="drawer-inner">
+    <div class="drawer-head">
+      <div><h2 id="chartTitle">График</h2><p class="subtle" id="chartWhat"></p></div>
+      <button type="button" class="link" data-close>Закрыть</button>
+    </div>
+    <div class="drawer-body">
+      <div class="chart-box" id="liveChart"></div>
+      <div class="chart-keys" id="liveKeys"></div>
+    </div>
+  </div>
 </dialog>
 
 <dialog class="drawer" id="logDialog">
@@ -400,30 +456,36 @@ async function api(path, opts = {}) {
 }
 
 // ---------- описание стратегии простыми словами ----------
+const SIDES = { long: ["long"], short: ["short"], both: ["long", "short"] };
+const caseFor = op => op === "above" || op === "below" ? "gen" : "acc";  // «выше чего», «пересекает что»
+function opLabel(o, kase = "label") {  // «RSI(14)», «нижняя полоса Боллинджера(20, 2)», «30»
+  if (o.value != null) return num(o.value);
+  const out = S.ind[o.ind]?.outputs.find(x => x.key === o.out);
+  return out ? out[kase].replace(/\{(\w+)\}/g, (_, k) => num(o[k])) : "?";
+}
+function condText(c) { return `${opLabel(c.left)} ${S.ops[c.op]} ${opLabel(c.right, caseFor(c.op))}`; }
+function setText(rows) { return rows.map(condText).join(" и "); }
+
 function recipe(b) {
-  const p = b.params, parts = [];
-  const both = p.direction === "both";
-  if (p.signal === "rsi") {
-    if (both) parts.push(`лонг при RSI(${p.rsi_period}) ниже ${num(p.rsi_low)}, шорт выше ${num(p.rsi_high)}`);
-    else if (p.direction === "short") parts.push(`шорт, когда RSI(${p.rsi_period}) выше ${num(p.rsi_high)}`);
-    else parts.push(`покупка, когда RSI(${p.rsi_period}) ниже ${num(p.rsi_low)}`);
-  } else if (p.signal === "ema_cross") {
-    parts.push(`вход по пересечению EMA ${p.ema_fast} и ${p.ema_slow}` + (both ? " в обе стороны" : p.direction === "short" ? ", только шорт" : ", только лонг"));
-  } else parts.push(p.direction === "short" ? "шорт сразу, без сигнала" : "покупка сразу, без сигнала");
-  if (p.safety_orders > 0) parts.push(`${p.safety_orders} усредн. с шагом ${num(p.so_step_pct)}%`);
-  if (p.take_profit_pct > 0) parts.push(`тейк ${num(p.take_profit_pct)}%`);
-  if (p.stop_loss_pct > 0) parts.push(`стоп ${num(p.stop_loss_pct)}%`);
-  if (p.exit_on_opposite && p.signal !== "none") parts.push("выход по обратному сигналу");
-  if (b.market === "futures" && p.leverage > 1) parts.push(`плечо ${p.leverage}×`);
-  const s = parts.join(", ");
+  const p = b.params, R = p.rules || {}, parts = [], sides = SIDES[p.direction] || ["long"];
+  const word = s => s === "long" ? "лонг" : "шорт";
+  if (p.signal === "none") parts.push(p.direction === "short" ? "шорт сразу, без условий" : "покупка сразу, без условий");
+  else sides.forEach(s => { if (R[s]?.length) parts.push(`${word(s)}, когда ${setText(R[s])}`); });
+  sides.forEach(s => { if (R["exit_" + s]?.length) parts.push(`закрыть ${word(s)}, когда ${setText(R["exit_" + s])}`); });
+  const risk = [];
+  if (p.safety_orders > 0) risk.push(`${p.safety_orders} усредн. с шагом ${num(p.so_step_pct)}%`);
+  if (p.take_profit_pct > 0) risk.push(`тейк ${num(p.take_profit_pct)}%`);
+  if (p.stop_loss_pct > 0) risk.push(`стоп ${num(p.stop_loss_pct)}%`);
+  if (p.exit_on_opposite && p.direction === "both") risk.push("разворот при сигнале в другую сторону");
+  if (b.market === "futures" && p.leverage > 1) risk.push(`плечо ${p.leverage}×`);
+  if (risk.length) parts.push(risk.join(", "));
+  const s = parts.join("; ");
   return s.charAt(0).toUpperCase() + s.slice(1) + `. Свечи ${b.timeframe}, первый ордер ${num(p.order_size, 2)} USDT.`;
 }
 
-function indicatorText(b) {
-  const ind = b.state.indicator || {};
-  if (b.params.signal === "rsi" && ind.rsi != null) return `RSI ${num(ind.rsi, 1)}`;
-  if (b.params.signal === "ema_cross" && ind.ema_fast != null) return `EMA ${b.params.ema_fast}: ${num(ind.ema_fast)}, EMA ${b.params.ema_slow}: ${num(ind.ema_slow)}`;
-  return "";
+function indicatorText(b) {  // «RSI(14) 40,5, EMA(200) 82 950»
+  return Object.entries(b.state.indicator || {}).filter(([, v]) => typeof v === "number")
+    .map(([k, v]) => `${k} ${num(v)}`).join(", ");
 }
 
 // ---------- лестница позиции ----------
@@ -515,10 +577,12 @@ function botHtml(b) {
     </div>`;
   const links = [
     `<button class="link" data-act="edit" data-id="${b.id}" ${b.running ? "disabled title='Сначала остановите бота'" : ""}>Изменить</button>`,
+    `<button class="link" data-act="chart" data-id="${b.id}">График</button>`,
+    `<button class="link" data-act="backtest" data-id="${b.id}">Проверить на истории</button>`,
     `<button class="link" data-act="logs" data-id="${b.id}">Журнал</button>`,
     pos ? `<button class="link danger" data-act="close" data-id="${b.id}">Закрыть позицию по рынку</button>` : "",
-    pos && !b.running ? `<button class="link" data-act="forget" data-id="${b.id}">Убрать позицию из памяти</button>` : "",
-    !b.running && !pos ? `<button class="link danger" data-act="delete" data-id="${b.id}">Удалить</button>` : "",
+    (pos || st.pending) && !b.running ? `<button class="link" data-act="forget" data-id="${b.id}">Убрать позицию из памяти</button>` : "",
+    !b.running && !pos && !st.pending ? `<button class="link danger" data-act="delete" data-id="${b.id}">Удалить</button>` : "",
   ].join("");
   return `<article class="bot ${status}">
     <div class="bot-head">
@@ -540,6 +604,7 @@ function botHtml(b) {
     <div class="name">${esc(b.name)}</div>
     <p class="recipe">${esc(recipe(b))}</p>
     ${st.error && b.running ? `<p class="err">Ошибка: ${esc(st.error)}</p>` : ""}
+    ${st.pending ? `<p class="hint warn">Ордер «${esc(st.pending.reason)}» ушёл на биржу, но ответ не пришёл. Бот найдёт его по ID при следующей проверке и до этого не торгует.</p>` : ""}
     ${body}
     ${result}
     <div class="bot-links">${links}</div>
@@ -587,6 +652,8 @@ $("#bots").addEventListener("click", async e => {
     if (act === "new") return openEditor(null);
     if (act === "edit") return openEditor(bot);
     if (act === "logs") return openLogs(bot);
+    if (act === "chart") return openChart(bot);
+    if (act === "backtest") return openBacktest(bot);
     if (act === "start") {
       if (bot.mode === "live" && !confirm(`Бот ${bot.symbol} будет торговать реальными деньгами на вашем счёте Binance. Запустить?`)) return;
       btn.disabled = true; await api(`/api/bots/${id}/start`, { method: "POST" }); toast("Бот запущен");
@@ -597,7 +664,7 @@ $("#bots").addEventListener("click", async e => {
       btn.disabled = true; await api(`/api/bots/${id}/close`, { method: "POST" }); toast("Позиция закрыта");
     }
     if (act === "forget") {
-      if (!confirm("Бот забудет о позиции, ордер на бирже не отправится. Используйте это, если уже закрыли позицию на Binance сами. Продолжить?")) return;
+      if (!confirm("Бот забудет о позиции и неподтверждённом ордере, ордер на бирже не отправится. Используйте это, если уже разобрались с позицией на Binance сами. Продолжить?")) return;
       await api(`/api/bots/${id}/forget`, { method: "POST" }); toast("Позиция убрана из памяти бота");
     }
     if (act === "delete") {
@@ -621,8 +688,89 @@ async function openLogs(bot) {
 // ---------- редактор ----------
 const F = $("#form");
 const E = F.elements;
-const PARAM_FIELDS = ["signal", "rsi_period", "rsi_low", "rsi_high", "ema_fast", "ema_slow", "order_size", "leverage",
-  "take_profit_pct", "stop_loss_pct", "safety_orders", "so_step_pct", "so_step_scale", "so_volume_mult"];
+const PARAM_FIELDS = ["order_size", "leverage", "take_profit_pct", "stop_loss_pct",
+  "safety_orders", "so_step_pct", "so_step_scale", "so_volume_mult"];
+
+// ---------- конструктор условий ----------
+// Списки строятся из описания индикаторов, которое приходит с сервера (/api/meta).
+const SET_TITLES = { long: "Вход в лонг", short: "Вход в шорт", exit_long: "Выход из лонга", exit_short: "Выход из шорта" };
+const SET_PREFIX = { long: "Лонг, когда", short: "Шорт, когда", exit_long: "Закрыть лонг, когда", exit_short: "Закрыть шорт, когда" };
+const MAX_ROWS = 8;
+const RSI14 = { ind: "rsi", out: "value", period: 14 };
+const NEW_ROW = {
+  long: { left: RSI14, op: "below", right: { value: 30 } }, short: { left: RSI14, op: "above", right: { value: 70 } },
+  exit_long: { left: RSI14, op: "above", right: { value: 70 } }, exit_short: { left: RSI14, op: "below", right: { value: 30 } },
+};
+
+function paramsHtml(o) {
+  if (o.value != null) return `<span class="o-params" data-ind="num"><input type="number" class="o-num" step="any" value="${o.value}" aria-label="Число"></span>`;
+  const spec = S.ind[o.ind];
+  return `<span class="o-params" data-ind="${o.ind}">${spec.params.map(p => `<label class="o-p">${esc(p.label)}
+    <input type="number" data-k="${p.key}" min="${p.min}" max="${p.max}" step="${p.int ? 1 : "any"}" value="${o[p.key] ?? p.default}"></label>`).join("")}</span>`;
+}
+function operandHtml(o, side) {
+  const cur = o.value != null ? "num" : `${o.ind}:${o.out}`;
+  const opt = (v, text) => `<option value="${v}"${v === cur ? " selected" : ""}>${esc(text)}</option>`;
+  const list = S.meta.indicators.map(spec => spec.outputs.length > 1
+    ? `<optgroup label="${esc(spec.title)}">${spec.outputs.map(out => opt(`${spec.id}:${out.key}`, cap(out.name))).join("")}</optgroup>`
+    : opt(`${spec.id}:${spec.outputs[0].key}`, spec.title)).join("");
+  return `<span class="operand" data-side="${side}"><select class="o-sel" aria-label="${side === "l" ? "Индикатор" : "С чем сравнить"}">${side === "r" ? opt("num", "Число") : ""}${list}</select>${paramsHtml(o)}</span>`;
+}
+function ruleHtml(c, i) {
+  return `<div class="rule">${i ? `<span class="and">и</span>` : ""}${operandHtml(c.left, "l")}
+    <select class="r-op" aria-label="Условие">${S.meta.ops.map(o => `<option value="${o.id}"${o.id === c.op ? " selected" : ""}>${esc(o.name)}</option>`).join("")}</select>
+    ${operandHtml(c.right, "r")}<button type="button" class="r-del" aria-label="Убрать условие" title="Убрать условие">×</button></div>`;
+}
+function setHtml(key, rows) {
+  const empty = key.startsWith("exit") ? "Нет условий выхода: позицию закроют тейк, стоп или разворот." : "Нет условий — добавьте хотя бы одно.";
+  return `<div class="ruleset" data-set="${key}">
+    <div class="ruleset-head"><h4>${SET_TITLES[key]}</h4><button type="button" class="link r-add"${rows.length >= MAX_ROWS ? " disabled" : ""}>+ условие</button></div>
+    ${rows.length ? rows.map(ruleHtml).join("") : `<p class="subtle r-empty">${empty}</p>`}
+    <p class="rule-text"></p></div>`;
+}
+function renderSets(r) {
+  $("#entrySets").innerHTML = ["long", "short"].map(k => setHtml(k, r[k] || [])).join("");
+  $("#exitSets").innerHTML = ["exit_long", "exit_short"].map(k => setHtml(k, r[k] || [])).join("");
+}
+function readOperand(el) {
+  const v = el.querySelector(".o-sel").value;
+  if (v === "num") return { value: Number(el.querySelector(".o-num")?.value ?? 0) };
+  const [ind, out] = v.split(":"), o = { ind, out }, box = el.querySelector(".o-params");
+  if (box.dataset.ind === ind) box.querySelectorAll("input[data-k]").forEach(inp => o[inp.dataset.k] = Number(inp.value));
+  else S.ind[ind].params.forEach(p => o[p.key] = p.default);  // индикатор только что сменили
+  return o;
+}
+function readRules() {
+  const out = {};
+  $$(".ruleset", F).forEach(box => out[box.dataset.set] = $$(".rule", box).map(row => ({
+    left: readOperand(row.querySelector('.operand[data-side="l"]')),
+    op: row.querySelector(".r-op").value,
+    right: readOperand(row.querySelector('.operand[data-side="r"]')),
+  })));
+  return out;
+}
+// добавить / убрать строку
+F.addEventListener("click", e => {
+  const add = e.target.closest(".r-add"), del = e.target.closest(".r-del");
+  if (!add && !del) return;
+  const set = e.target.closest(".ruleset").dataset.set, r = readRules();
+  if (add) r[set].push(structuredClone(NEW_ROW[set]));
+  else r[set].splice($$(".rule", e.target.closest(".ruleset")).indexOf(del.closest(".rule")), 1);
+  renderSets(r);
+  syncForm();
+});
+// сменили индикатор или «число» — подставить его параметры
+F.addEventListener("change", e => {
+  const sel = e.target.closest(".o-sel");
+  if (!sel) return;
+  const el = sel.closest(".operand"), row = el.closest(".rule");
+  const prevLeft = el.dataset.side === "l" ? el.querySelector(".o-params").dataset.ind : null;
+  const o = sel.value === "num" ? { value: S.ind[readOperand(row.querySelector('.operand[data-side="l"]')).ind].value } : readOperand(el);
+  el.querySelector(".o-params").outerHTML = paramsHtml(o);
+  // слева сменили индикатор, а справа стоит его типичное число — подставим типичное для нового (RSI 30 → стохастик 20)
+  const right = row.querySelector('.operand[data-side="r"] .o-num');
+  if (prevLeft && right && S.ind[prevLeft] && Number(right.value) === S.ind[prevLeft].value) right.value = S.ind[o.ind].value;
+});
 
 function setRadio(name, v) { const el = F.querySelector(`input[name=${name}][value="${v}"]`); if (el) el.checked = true; }
 function getRadio(name) { return F.querySelector(`input[name=${name}]:checked`)?.value; }
@@ -635,8 +783,10 @@ function fillForm(bot) {
   setRadio("market", bot?.market || "spot");
   setRadio("mode", bot?.mode || "paper");
   setRadio("direction", p.direction);
+  setRadio("signal", p.signal === "none" ? "none" : "rules");
   PARAM_FIELDS.forEach(k => E[k].value = p[k]);
   E.exit_on_opposite.checked = !!p.exit_on_opposite;
+  renderSets(p.rules);
 }
 function applyPreset(id) {
   const pr = S.meta.presets.find(x => x.id === id);
@@ -645,13 +795,18 @@ function applyPreset(id) {
   const p = { ...S.meta.defaults, ...pr.params };
   PARAM_FIELDS.forEach(k => { if (k !== "order_size") E[k].value = p[k]; });
   E.exit_on_opposite.checked = !!p.exit_on_opposite;
+  if (pr.market) setRadio("market", pr.market);
   setRadio("direction", p.direction);
+  setRadio("signal", "rules");
   E.timeframe.value = pr.timeframe;
+  renderSets(p.rules);
   syncForm();
 }
 function readForm() {
   const params = {};
-  PARAM_FIELDS.forEach(k => params[k] = k === "signal" ? E[k].value : Number(E[k].value));
+  PARAM_FIELDS.forEach(k => params[k] = Number(E[k].value));
+  params.signal = getRadio("signal");
+  params.rules = readRules();
   params.direction = getRadio("direction");
   params.exit_on_opposite = E.exit_on_opposite.checked;
   return { name: E.bot_name.value.trim(), symbol: E.symbol.value.trim(), timeframe: E.timeframe.value,
@@ -659,7 +814,6 @@ function readForm() {
 }
 function syncForm() {
   const d = readForm(), p = d.params, fut = d.market === "futures";
-  $$("[data-sig]").forEach(el => el.hidden = el.dataset.sig !== p.signal);
   $$("input[name=direction]").forEach(el => { if (el.value !== "long") el.disabled = !fut; });
   if (!fut && p.direction !== "long") setRadio("direction", "long");
   const both = F.querySelector("input[name=direction][value=both]");
@@ -667,9 +821,15 @@ function syncForm() {
   if (both.disabled && both.checked) setRadio("direction", "long");
   $("#dirHint").textContent = fut ? "" : "На споте бот только покупает и продаёт купленное. Шорт доступен на фьючерсах.";
   $("#levField").hidden = !fut;
-  const dir = getRadio("direction");
-  $("#rsiLowLbl").textContent = dir === "short" ? "Выход из шорта при RSI ниже" : dir === "both" ? "Лонг при RSI ниже" : "Покупка при RSI ниже";
-  $("#rsiHighLbl").textContent = dir === "long" ? "Продажа при RSI выше" : "Шорт при RSI выше";
+  const dir = getRadio("direction"), sides = SIDES[dir];
+  // показываем только наборы для выбранного направления
+  $$(".ruleset", F).forEach(box => {
+    const set = box.dataset.set, rows = p.rules[set] || [];
+    box.hidden = !sides.includes(set.replace("exit_", "")) || (!set.startsWith("exit") && p.signal === "none");
+    box.querySelector(".rule-text").textContent = rows.length ? `${SET_PREFIX[set]} ${setText(rows)}.` : "";
+  });
+  $("#rulesHint").hidden = p.signal === "none";
+  $("#flipField").hidden = dir !== "both";
   $$("[data-so]").forEach(el => el.hidden = !(p.safety_orders > 0));
 
   // подсказка про объём сделки
@@ -684,7 +844,9 @@ function syncForm() {
   const warns = [];
   if (fut && lev > 1 && !(p.stop_loss_pct > 0)) warns.push("Без стоп-лосса при плече биржа может ликвидировать позицию.");
   if (p.stop_loss_pct > 0 && p.safety_orders > 0 && p.stop_loss_pct <= dev) warns.push("Стоп ближе последнего усреднения: часть усреднений может не успеть сработать.");
-  if (p.signal === "none" && !(p.take_profit_pct > 0)) warns.push("Без сигнала боту нужен тейк-профит, иначе он не выйдет из сделки.");
+  const noExit = sides.some(sd => !p.rules["exit_" + sd].length) && !(p.take_profit_pct > 0) && !(p.stop_loss_pct > 0) && !(E.exit_on_opposite.checked && dir === "both");
+  if (noExit) warns.push("Боту нужен способ выйти: тейк-профит, стоп-лосс или условия выхода.");
+  if (p.signal === "rules" && sides.some(sd => !p.rules[sd].length)) warns.push("Добавьте условия входа для выбранного направления.");
   $("#exitWarn").textContent = warns.join(" ");
 
   // режимы
@@ -694,16 +856,12 @@ function syncForm() {
   $("#liveNote").textContent = !m.live_allowed ? "Выключено. Чтобы включить, поставьте ALLOW_LIVE=1 в .env." : m.has_live_keys ? "Ордера на вашем счёте Binance." : "Нужны ключи API в файле .env.";
   demo.disabled = !m.has_demo_keys && !demo.checked;
   live.disabled = (!m.live_allowed || !m.has_live_keys) && !live.checked;
-
-  const n = +$("#btCandles").value, mins = n * (TF_MIN[d.timeframe] || 15);
-  $("#btPeriod").textContent = `Это примерно ${mins < 2880 ? num(mins / 60, 0) + " ч" : num(mins / 1440, 0) + " дн"} истории.`;
 }
 
 function openEditor(bot) {
   S.editing = bot ? bot.id : null;
   $("#editorTitle").textContent = bot ? `Настройки: ${bot.name}` : "Новый бот";
   $("#saveBtn").textContent = bot ? "Сохранить изменения" : "Создать бота";
-  $("#btResult").innerHTML = "";
   $("#preset").value = "";
   $("#presetAbout").textContent = "";
   fillForm(bot);
@@ -727,65 +885,337 @@ F.addEventListener("submit", async e => {
   } catch (err) { toast(err.message, true); }
 });
 
-// ---------- бэктест ----------
-$("#runBt").onclick = async () => {
-  const btn = $("#runBt"), box = $("#btResult");
-  btn.disabled = true; btn.textContent = "Загружаю историю…";
-  box.innerHTML = "";
+// ---------- график: свечи, индикатор, сделки бота ----------
+const DAY = 864e5;
+const MAX_BT_CANDLES = 40000;
+S.charts = {};
+
+function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+function rgba(hex, a) {
+  let h = hex.replace("#", "");
+  if (h.length === 3) h = [...h].map(c => c + c).join("");
+  const n = parseInt(h, 16);
+  return `rgba(${n >> 16 & 255}, ${n >> 8 & 255}, ${n & 255}, ${a})`;
+}
+function plural(n, one, few, many) {
+  const a = Math.abs(n) % 100, b = a % 10;
+  return a > 10 && a < 20 ? many : b === 1 ? one : b >= 2 && b <= 4 ? few : many;
+}
+function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
+function day(ts) { return new Date(ts).toLocaleDateString("ru-RU"); }
+// Библиотека рисует время в UTC. Сдвигаем всё на текущий часовой пояс одним числом:
+// так подписи совпадают с местным временем, а порядок свечей не ломается на переходе на летнее время.
+const TZ_SHIFT = -new Date().getTimezoneOffset() * 60;
+const chartTs = ms => Math.floor(ms / 1000) + TZ_SHIFT;
+function chartTime(t) {
+  return new Date(t * 1000).toLocaleString("ru-RU", { timeZone: "UTC", day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+function dropChart(key) { if (S.charts[key]) { S.charts[key].remove(); S.charts[key] = null; } }
+
+function eventText(e) {
+  const side = e.side === "long" ? "лонг" : "шорт";
+  if (e.action === "open") return `▲ Вход в ${side} по ${num(e.price)} — ${esc(e.reason)}`;
+  if (e.action === "safety") return `● ${esc(cap(e.reason))} по ${num(e.price)}`;
+  return `▼ Выход по ${num(e.price)} — ${esc(e.reason)}: <b class="${cls(e.pnl)}">${usdt(e.pnl)}</b>${e.pnl_pct != null ? ` (${pct(e.pnl_pct)})` : ""}`;
+}
+
+/* Рисует график в box. d — {candles, events, rsi?, rsi_levels?, ema?, equity?}.
+   opt: timeframe, levels (уровни открытой позиции), lastBars (сколько последних свечей показать). */
+function drawChart(box, d, opt = {}) {
+  const L = window.LightweightCharts;
+  if (!L) {
+    box.innerHTML = `<p class="hint warn" style="margin:12px">График не загрузился: нет доступа к cdn.jsdelivr.net. Цифры и сделки посчитаны и без него.</p>`;
+    return null;
+  }
+  const c = { ink: cssVar("--ink"), muted: cssVar("--muted"), rule: cssVar("--rule"), surface: cssVar("--surface"),
+              accent: cssVar("--accent"), profit: cssVar("--profit"), loss: cssVar("--loss"), warn: cssVar("--warn") };
+  box.innerHTML = `<div class="lwc"></div><div class="legend"></div>`;
+  const host = box.querySelector(".lwc"), legend = box.querySelector(".legend");
+  const lastClose = d.candles.length ? d.candles[d.candles.length - 1][4] : 1;
+  const prec = Math.max(2, Math.min(8, 4 - Math.floor(Math.log10(Math.abs(lastClose) || 1))));
+  const fmt = (digits, minMove) => ({ type: "custom", minMove, formatter: v => num(v, digits) });
+  const chart = L.createChart(host, {
+    autoSize: true,
+    layout: { background: { color: c.surface }, textColor: c.muted, fontFamily: cssVar("--font"), fontSize: 12,
+              panes: { separatorColor: c.rule, separatorHoverColor: rgba(c.rule, .5) } },
+    grid: { vertLines: { visible: false }, horzLines: { color: rgba(c.rule, .55) } },
+    rightPriceScale: { borderColor: c.rule },
+    // minBarSpacing: даём сжать даже 40 000 свечей в ширину экрана, иначе весь период не помещается
+    timeScale: { borderColor: c.rule, timeVisible: (TF_MIN[opt.timeframe] || 15) < 1440, secondsVisible: false, rightOffset: 4, minBarSpacing: 0.01 },
+    crosshair: { mode: 0 },
+    localization: { locale: "ru-RU", timeFormatter: chartTime },
+    handleScroll: { mouseWheel: false }, handleScale: { mouseWheel: false },
+  });
+  // Колесо мыши по умолчанию прокручивает страницу. После клика по графику оно
+  // масштабирует график, пока курсор над ним — как карты на сайтах.
+  const wheel = on => chart.applyOptions({ handleScroll: { mouseWheel: on }, handleScale: { mouseWheel: on } });
+  host.addEventListener("pointerdown", () => wheel(true));
+  host.addEventListener("mouseleave", () => wheel(false));
+
+  const candles = chart.addSeries(L.CandlestickSeries, {
+    upColor: c.profit, downColor: c.loss, borderVisible: false, wickUpColor: c.profit, wickDownColor: c.loss,
+    priceFormat: fmt(prec, 10 ** -prec),
+  });
+  const times = d.candles.map(k => chartTs(k[0]));
+  candles.setData(d.candles.map((k, i) => ({ time: times[i], open: k[1], high: k[2], low: k[3], close: k[4] })));
+  const line = vals => vals.map((v, i) => v == null ? { time: times[i] } : { time: times[i], value: v });
+  const quiet = { priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false };
+
+  // индикаторы из условий: «main» — поверх свечей, остальные — каждый в своей панели снизу
+  const panes = ["main"], palette = [c.accent, c.warn, c.ink, c.muted], used = {}, lines = [];
+  for (const s of d.series || []) {
+    let pi = panes.indexOf(s.pane);
+    if (pi < 0) { panes.push(s.pane); pi = panes.length - 1; }
+    const color = palette[(used[pi] = (used[pi] ?? -1) + 1) % palette.length];
+    const digits = pi === 0 ? prec : 2, priceFormat = fmt(digits, 10 ** -digits);
+    let ser;
+    if (s.style === "line") {
+      ser = chart.addSeries(L.LineSeries, { ...quiet, lastValueVisible: pi > 0, title: pi > 0 ? s.label : "", color, lineWidth: 2, priceFormat }, pi);
+      ser.setData(line(s.values));
+    } else {  // гистограмма MACD (цвет по знаку) или объём
+      ser = chart.addSeries(L.HistogramSeries, { priceLineVisible: false, lastValueVisible: false, priceFormat }, pi);
+      ser.setData(s.values.map((v, i) => v == null ? { time: times[i] }
+        : { time: times[i], value: v, color: s.style === "volume" ? rgba(c.muted, .55) : rgba(v >= 0 ? c.profit : c.loss, .6) }));
+    }
+    lines.push({ ser, label: s.label, digits, pane: pi });
+  }
+  for (const t of d.thresholds || []) {  // числа из условий — пунктиром на своей панели
+    const pi = panes.indexOf(t.pane), host = pi === 0 ? candles : lines.find(x => x.pane === pi)?.ser;
+    host?.createPriceLine({ price: t.value, color: c.muted, lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "" });
+  }
+  for (let i = 1; i < panes.length; i++) chart.panes()[i].setStretchFactor(0.6);
+  let pane = panes.length, eq = null;
+  if (d.equity) {
+    eq = chart.addSeries(L.BaselineSeries, {
+      baseValue: { type: "price", price: 0 }, lineWidth: 2, priceLineVisible: false, priceFormat: fmt(2, 0.01),
+      topLineColor: c.profit, topFillColor1: rgba(c.profit, .28), topFillColor2: rgba(c.profit, .04),
+      bottomLineColor: c.loss, bottomFillColor1: rgba(c.loss, .04), bottomFillColor2: rgba(c.loss, .28),
+    }, pane);
+    eq.setData(d.equity.map((v, i) => ({ time: times[i], value: v })));
+    chart.panes()[pane++].setStretchFactor(0.7);
+  }
+  chart.panes()[0].setStretchFactor(3);  // свечи — основная часть, индикатор и итог — полосы снизу
+
+  // сделки: ▲ вход, ● усреднение, ▼ выход (цвет — результат)
+  const byTime = new Map(), marks = [];
+  for (const e of d.events) {
+    const t = chartTs(e.ts), long = e.side === "long";
+    if (!byTime.has(t)) byTime.set(t, []);
+    byTime.get(t).push(e);
+    if (e.action === "open") marks.push({ time: t, position: long ? "belowBar" : "aboveBar", shape: long ? "arrowUp" : "arrowDown", color: c.accent });
+    else if (e.action === "safety") marks.push({ time: t, position: long ? "belowBar" : "aboveBar", shape: "circle", color: c.muted, size: 0.7 });
+    else marks.push({ time: t, position: long ? "aboveBar" : "belowBar", shape: long ? "arrowDown" : "arrowUp",
+                      color: e.pnl >= 0 ? c.profit : c.loss, text: e.pnl_pct != null ? pct(e.pnl_pct) : usdt(e.pnl) });
+  }
+  L.createSeriesMarkers(candles, marks.sort((a, b) => a.time - b.time));
+
+  if (opt.levels) {
+    const lv = opt.levels;
+    const priceLine = (price, color, title, lineStyle) => price && candles.createPriceLine({ price, color, lineWidth: 1, lineStyle, axisLabelVisible: true, title });
+    priceLine(lv.avg, c.ink, "средняя", 0);
+    priceLine(lv.tp, c.profit, "тейк", 2);
+    priceLine(lv.sl, c.loss, "стоп", 2);
+    lv.so.forEach((so, i) => { if (!so.filled) priceLine(so.price, c.muted, `усредн. ${i + 1}`, 1); });
+  }
+
+  const idle = `<span class="subtle">Наведите на свечу со стрелкой — здесь появится, почему бот вошёл или вышел. Масштаб: кликните по графику и крутите колесо.</span>`;
+  legend.innerHTML = idle;
+  chart.subscribeCrosshairMove(p => {
+    if (!p.time) { legend.innerHTML = idle; return; }
+    const b = p.seriesData.get(candles);
+    let h = `<b>${chartTime(p.time)}</b>`;
+    if (b) h += ` откр. ${num(b.open, prec)} · макс. ${num(b.high, prec)} · мин. ${num(b.low, prec)} · закр. ${num(b.close, prec)}`;
+    for (const x of lines) {
+      const v = p.seriesData.get(x.ser)?.value;
+      if (v != null) h += ` · ${esc(x.label)} ${num(v, x.digits)}`;
+    }
+    const v = eq && p.seriesData.get(eq);
+    if (v) h += ` · итог ${usdt(v.value)}`;
+    legend.innerHTML = `<span>${h}</span>` + (byTime.get(p.time) || []).map(e => `<br><span>${eventText(e)}</span>`).join("");
+  });
+
+  const n = times.length;
+  if (opt.lastBars && n > opt.lastBars) chart.timeScale().setVisibleLogicalRange({ from: n - opt.lastBars, to: n + 3 });
+  else chart.timeScale().fitContent();
+
+  return {
+    remove: () => chart.remove(),
+    range: () => chart.timeScale().getVisibleLogicalRange(),
+    setRange: r => { if (r) chart.timeScale().setVisibleLogicalRange(r); },
+    focus(fromMs, toMs) {  // показать одну сделку с запасом по краям
+      const a = chartTs(fromMs), b = chartTs(toMs), bar = (TF_MIN[opt.timeframe] || 15) * 60;
+      const pad = Math.max(30 * bar, (b - a) * 0.4);
+      chart.timeScale().setVisibleRange({ from: a - pad, to: b + pad });
+    },
+  };
+}
+
+function chartKeys(extra = "") {
+  return `<span><b style="color:var(--accent)">▲</b> вход</span><span><b style="color:var(--muted)">●</b> усреднение</span>
+    <span><b class="pos">▼</b><b class="neg">▼</b> выход: зелёный — в плюс, красный — в минус</span>${extra}`;
+}
+
+// ---------- проверка на истории ----------
+function dateValue(ms) {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+function btRange() {
+  const v = $("input[name=btp]:checked").value, now = Date.now();
+  if (v !== "custom") return { from: now - +v * DAY, to: now };
+  const from = new Date($("#btFrom").value + "T00:00").getTime();
+  const to = Math.min(new Date($("#btTo").value + "T00:00").getTime() + DAY, now);  // включая последний день
+  return { from, to };
+}
+function btSync() {
+  $("#btDates").hidden = $("input[name=btp]:checked").value !== "custom";
+  const { from, to } = btRange(), tf = S.bt.timeframe;
+  const n = Math.floor((to - from) / 6e4 / (TF_MIN[tf] || 15));
+  let msg = `≈ ${num(n, 0)} ${plural(n, "свеча", "свечи", "свечей")} ${tf}.`, ok = true;
+  if (!(n > 0)) { msg = "Выберите даты: начало должно быть раньше конца."; ok = false; }
+  else if (n > MAX_BT_CANDLES) { msg += ` За раз можно проверить не больше ${num(MAX_BT_CANDLES, 0)} — возьмите период короче или свечи крупнее.`; ok = false; }
+  else if (n < 50) { msg += " Нужно хотя бы 50 свечей — возьмите период длиннее."; ok = false; }
+  $("#btEstimate").textContent = msg;
+  $("#btEstimate").className = "hint" + (ok ? "" : " warn");
+  $("#btRun").disabled = !ok;
+}
+function openBacktest(cfg) {
+  S.bt = { name: cfg.name, symbol: cfg.symbol, timeframe: cfg.timeframe, market: cfg.market, mode: "paper", params: cfg.params };
+  $("#btWhat").textContent = `${cfg.symbol || "—"} · ${MARKET_NAME[cfg.market]} · ${recipe(cfg)}`;
+  if (!$("#btFrom").value) { $("#btFrom").value = dateValue(Date.now() - 90 * DAY); $("#btTo").value = dateValue(Date.now()); }
+  dropChart("bt");
+  S.btResult = null;
+  $("#btResult").innerHTML = "";
+  btSync();
+  $("#btDialog").showModal();
+}
+$("#runBt").onclick = () => openBacktest(readForm());
+$("#btPeriods").addEventListener("change", btSync);
+$("#btFrom").addEventListener("change", btSync);
+$("#btTo").addEventListener("change", btSync);
+$("#btDialog").addEventListener("close", () => dropChart("bt"));
+
+$("#btRun").onclick = async () => {
+  const btn = $("#btRun"), box = $("#btResult"), { from, to } = btRange();
+  btn.disabled = true; btn.textContent = "Считаю…";
+  dropChart("bt");
+  box.innerHTML = `<p class="hint">Загружаю свечи с Binance и прогоняю бота. На длинных периодах это до полуминуты.</p>`;
   try {
-    const r = await api("/api/backtest", { method: "POST", body: { ...readForm(), candles: +$("#btCandles").value } });
+    const r = await api("/api/backtest", { method: "POST", body: { ...S.bt, from, to } });
+    S.btResult = r;
     box.innerHTML = btHtml(r);
+    S.charts.bt = drawChart($("#btChart"), r.chart, { timeframe: r.timeframe });
   } catch (err) {
     box.innerHTML = `<p class="err">${esc(err.message)}</p>`;
-  } finally { btn.disabled = false; btn.textContent = "Проверить на истории"; }
+  } finally {
+    btn.textContent = "Запустить проверку"; btSync();
+  }
 };
 
 function btHtml(r) {
-  const from = new Date(r.from).toLocaleDateString("ru-RU"), to = new Date(r.to).toLocaleDateString("ru-RU");
-  let lead = r.trades
-    ? `С ${from} по ${to} бот закрыл бы ${r.trades} сделок с итогом <b class="${cls(r.pnl)}">${usdt(r.pnl)}</b> (${pct(r.pnl_pct)} от максимальной суммы в сделке). Цена за это время изменилась на ${pct(r.price_change_pct)}.`
-    : `С ${from} по ${to} бот не закрыл ни одной сделки. Попробуйте другие пороги сигнала или больше истории.`;
-  if (r.open_position) lead += ` В конце периода оставалась открытая позиция: ${usdt(r.open_position.unrealized)}.`;
-  const stats = [
-    ["Сделок в плюсе", r.winrate == null ? "—" : `${r.wins} из ${r.trades} (${num(r.winrate, 0)}%)`],
-    ["Худшая просадка", usdt(-r.max_drawdown)],
-    ["Комиссии", num(r.fees, 2) + " USDT"],
-    ["Макс. в сделке", num(r.capital, 2) + " USDT"],
-    ["Средняя длительность", duration(r.avg_duration_ms)],
-    ["Усреднений максимум", String(r.max_so_used)],
+  const s = r.summary, base = esc(S.bt.symbol.split("/")[0]);
+  const open = r.trades.find(t => t.open_at_end);
+  let lead = s.trades
+    ? `С ${day(r.from)} по ${day(r.to)} бот закрыл бы <b>${s.trades}</b> ${plural(s.trades, "сделку", "сделки", "сделок")}: ${s.wins} в плюсе, ${s.losses} в минусе. Итог — <b class="${cls(s.pnl)}">${usdt(s.pnl)}</b>, это ${pct(s.pnl_pct)} от ${num(s.capital, 2)} USDT, которые могли понадобиться на одну сделку.`
+    : `С ${day(r.from)} по ${day(r.to)} бот не закрыл бы ни одной сделки.`;
+  lead += ` Цена ${base} за это время изменилась на ${pct(r.price_change_pct)}.`;
+  if (open) lead += ` В конце периода оставалась открытая позиция: <b class="${cls(open.pnl)}">${usdt(open.pnl)}</b>.`;
+
+  const tiles = [
+    ["Итог закрытых сделок", `<b class="${cls(s.pnl)}">${usdt(s.pnl)}</b>`],
+    ["В плюсе", s.winrate == null ? "—" : `${s.wins} из ${s.trades} (${num(s.winrate, 0)}%)`],
+    ["Средняя сделка", usdt(s.avg_trade)],
+    ["Лучшая / худшая", `${usdt(s.best)} / ${usdt(s.worst)}`],
+    ["Худшая просадка", usdt(s.max_drawdown ? -s.max_drawdown : 0)],
+    ["Комиссии", num(s.fees, 2) + " USDT"],
+    ["В сделке на пике", `${num(s.max_used, 2)} из ${num(s.capital, 2)} USDT`],
   ];
+
+  const sg = r.signals;
+  const entries = sg.condition
+    ? `Условие «${esc(sg.condition)}» выполнялось на ${num(sg.bars, 0)} ${plural(sg.bars, "свече", "свечах", "свечах")} из ${num(r.candles, 0)}. Бот вошёл ${sg.entries} ${plural(sg.entries, "раз", "раза", "раз")}${sg.bars > sg.entries ? " — в остальное время он уже держал позицию" : ""}.`
+    : `Без сигнала бот входит сразу, как только закрыта предыдущая сделка. Входов: ${sg.entries}.`;
+  const exits = r.by_reason.length
+    ? `<table class="mini"><tbody>${r.by_reason.map(g => `<tr><td>${esc(cap(g.reason))}</td><td class="num">${g.count} ${plural(g.count, "сделка", "сделки", "сделок")}</td><td class="num ${cls(g.pnl)}">${usdt(g.pnl)}</td></tr>`).join("")}</tbody></table>`
+    : `<p class="subtle">Выходов не было.</p>`;
+
+  const shown = r.trades.slice(-1000), skip = r.trades.length - shown.length;
+  const rows = shown.map((t, k) => {
+    const i = k + skip, end = t.open_at_end;
+    return `<tr data-i="${i}">
+      <td class="num">${i + 1}</td>
+      <td>${when(t.open_ts)}<br><span class="subtle">${t.side === "long" ? "лонг" : "шорт"} по ${num(t.open_price)}</span></td>
+      <td class="wrap">${esc(t.entry_reason)}</td>
+      <td class="num">${t.adds.length || "—"}</td>
+      <td>${end ? "—" : `${when(t.close_ts)}<br><span class="subtle">по ${num(t.close_price)}</span>`}</td>
+      <td class="wrap">${end ? "ещё открыта" : esc(t.exit_reason)}</td>
+      <td>${duration((end ? r.to : t.close_ts) - t.open_ts)}</td>
+      <td class="num ${cls(t.pnl)}">${usdt(t.pnl)}<br><span class="subtle">${pct(t.pnl_pct)}</span></td>
+    </tr>`;
+  }).join("");
+
   return `<p class="bt-lead">${lead}</p>
-    <div class="bt-stats">${stats.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join("")}</div>
-    ${equityChart(r.equity)}
-    <p class="hint">Проверка приблизительная: внутри свечи порядок движения цены неизвестен, проскальзывание и ликвидации не учтены. Хороший результат на истории не обещает прибыль в будущем.</p>
-    ${r.last_trades.length ? `<div class="table-wrap bt-trades"><table><thead><tr><th>Выход</th><th>Сторона</th><th class="num">Цена</th><th class="num">Результат</th><th>Причина</th></tr></thead><tbody>
-      ${r.last_trades.map(t => `<tr><td>${when(t.ts)}</td><td>${t.side === "long" ? "лонг" : "шорт"}</td><td class="num">${num(t.price)}</td><td class="num ${cls(t.pnl)}">${usdt(t.pnl)}</td><td>${esc(t.reason)}${t.so_used ? `, усредн. ${t.so_used}` : ""}</td></tr>`).join("")}
-    </tbody></table></div><p class="hint">Последние ${r.last_trades.length} сделок.</p>` : ""}`;
+    <div class="tiles">${tiles.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join("")}</div>
+    <div class="why">
+      <div><h3>Почему входил</h3><p>${entries}</p></div>
+      <div><h3>Почему выходил</h3>${exits}</div>
+    </div>
+    <div class="chart-box" id="btChart"></div>
+    <div class="chart-keys">${chartKeys("<span>нижняя панель — итог закрытых сделок плюс открытая позиция</span>")}</div>
+    ${r.trades.length ? `<div class="section-head" style="margin-top:28px;margin-bottom:0"><h3 style="margin:0">Все сделки</h3><span class="subtle">Нажмите на строку — график покажет эту сделку</span></div>
+    <div class="table-wrap trades-bt"><table>
+      <thead><tr><th class="num">№</th><th>Вход</th><th>Почему вошёл</th><th class="num">Усредн.</th><th>Выход</th><th>Почему вышел</th><th>Длилась</th><th class="num">Результат</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+    ${skip ? `<p class="hint">Показаны последние 1000 сделок из ${r.trades.length}.</p>` : ""}` : ""}
+    <p class="hint">Проверка приблизительная: порядок движения цены внутри свечи неизвестен, проскальзывание и ликвидации не учтены. Хороший результат на истории не обещает прибыль в будущем.</p>`;
 }
 
-function equityChart(pts) {
-  if (!pts || pts.length < 2) return "";
-  const vals = pts.map(p => p.v);
-  let lo = Math.min(0, ...vals), hi = Math.max(0, ...vals);
-  if (hi === lo) hi = lo + 1;
-  const W = 1000, H = 150;
-  const X = i => (i / (pts.length - 1)) * W, Y = v => H - ((v - lo) / (hi - lo)) * H;
-  const line = pts.map((p, i) => `${X(i).toFixed(1)},${Y(p.v).toFixed(1)}`).join(" ");
-  const last = vals[vals.length - 1];
-  return `<div class="chart" aria-label="Результат по времени">
-    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
-      <line x1="0" x2="${W}" y1="${Y(0)}" y2="${Y(0)}" stroke="var(--rule)" stroke-dasharray="4 4" vector-effect="non-scaling-stroke"/>
-      <polyline points="${line}" fill="none" stroke="var(${last >= 0 ? "--profit" : "--loss"})" stroke-width="2" vector-effect="non-scaling-stroke"/>
-    </svg>
-    <span class="ax" style="top:2px">${usdt(hi)}</span>
-    <span class="ax" style="bottom:2px">${usdt(lo)}</span>
-  </div><p class="hint">Линия — итог закрытых сделок плюс открытая позиция на каждый момент.</p>`;
+$("#btResult").addEventListener("click", e => {
+  const tr = e.target.closest("tr[data-i]");
+  if (!tr || !S.btResult) return;
+  const t = S.btResult.trades[+tr.dataset.i];
+  $$("tr.active", $("#btResult")).forEach(x => x.classList.remove("active"));
+  tr.classList.add("active");
+  if (!S.charts.bt) return;
+  S.charts.bt.focus(t.open_ts, t.open_at_end ? S.btResult.to : t.close_ts);
+  const smooth = !matchMedia("(prefers-reduced-motion: reduce)").matches;
+  $("#btChart").scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "center" });
+});
+
+// ---------- живой график бота ----------
+async function openChart(bot) {
+  S.chartBot = bot.id;
+  $("#chartTitle").textContent = `${bot.symbol} · свечи ${bot.timeframe}`;
+  $("#chartWhat").textContent = `${MARKET_NAME[bot.market]} · ${bot.name}. Обновляется каждые 30 секунд.`;
+  $("#liveKeys").innerHTML = chartKeys("<span>линии — средняя цена, тейк, стоп и ещё не исполненные усреднения открытой позиции</span>");
+  $("#liveChart").innerHTML = `<p class="hint" style="margin:12px">Загружаю свечи…</p>`;
+  $("#chartDialog").showModal();
+  await loadLiveChart(true);
+  clearInterval(S.chartTimer);
+  S.chartTimer = setInterval(() => loadLiveChart(false), 30000);
 }
+async function loadLiveChart(first) {
+  const id = S.chartBot, bot = S.bots.find(b => b.id === id);
+  if (!bot) return;
+  try {
+    const r = await api(`/api/bots/${id}/chart`);
+    if (S.chartBot !== id) return;  // окно уже закрыли или открыли другого бота
+    const keep = first ? null : S.charts.live?.range();
+    dropChart("live");
+    S.charts.live = drawChart($("#liveChart"), r.chart, { timeframe: bot.timeframe, levels: r.levels, lastBars: 150 });
+    S.charts.live?.setRange(keep);
+  } catch (e) {
+    if (first) $("#liveChart").innerHTML = `<p class="err" style="margin:12px">${esc(e.message)}</p>`;
+  }
+}
+$("#chartDialog").addEventListener("close", () => { clearInterval(S.chartTimer); S.chartBot = null; dropChart("live"); });
 
 // ---------- старт ----------
 (async function init() {
   try { S.meta = await api("/api/meta"); }
   catch (e) { $("#summary").textContent = "Не удалось связаться с программой бота: " + e.message; return; }
+  S.ind = Object.fromEntries(S.meta.indicators.map(x => [x.id, x]));
+  S.ops = Object.fromEntries(S.meta.ops.map(o => [o.id, o.name]));
   $("#tf").innerHTML = S.meta.timeframes.map(t => `<option>${t}</option>`).join("");
   $("#preset").innerHTML = `<option value="">Свои настройки</option>` + S.meta.presets.map(p => `<option value="${p.id}">${esc(p.title)}</option>`).join("");
   await loadBots(true); loadTrades();

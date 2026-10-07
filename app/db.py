@@ -7,6 +7,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from . import config
+from .strategy import upgrade_params
 
 _lock = threading.Lock()
 _conn: Optional[sqlite3.Connection] = None
@@ -51,7 +52,7 @@ def init() -> None:
 
 def _row(r: sqlite3.Row) -> Dict[str, Any]:
     d = dict(r)
-    d["params"] = json.loads(d["params"])
+    d["params"] = upgrade_params(json.loads(d["params"]))  # старые боты — в формат условий
     d["state"] = json.loads(d["state"])
     d["enabled"] = bool(d["enabled"])
     return d
