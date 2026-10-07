@@ -1,0 +1,13 @@
+services:
+  bot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      HOST: 0.0.0.0
+    volumes:
+      - ./data:/bot/data
+    # Панель доступна только с самого сервера. Заходите через SSH-туннель:
+    #   ssh -L 8000:127.0.0.1:8000 user@ваш-сервер  →  http://localhost:8000
+    ports:
+      - "127.0.0.1:8000:8000"

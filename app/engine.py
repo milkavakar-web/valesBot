@@ -1,0 +1,195 @@
+"""Запуск ботов: каждый бот — отдельная задача asyncio, которая раз в POLL_SECONDS
+забирает свечи, проверяет стоп/тейк/усреднения и на новой свече считает сигнал."""
+import asyncio
+import logging
+import time
+from collections import deque
+from typing import Any, Deque, Dict, Optional, Tuple
+
+from . import config, db
+from .brokers import ExchangeBroker, PaperBroker, exchange_symbol, hub
+from .strategy import prepare
+from .trader import Trader
+
+logger = logging.getLogger("bot.engine")
+
+
+def now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+class Manager:
+    def __init__(self):
+        self.tasks: Dict[int, asyncio.Task] = {}
+        self.traders: Dict[int, Tuple[Trader, Any]] = {}
+        self.logs: Dict[int, Deque[str]] = {}
+        self.locks: Dict[int, asyncio.Lock] = {}
+
+    # ---------- служебное ----------
+
+    def log(self, bot_id: int, msg: str) -> None:
+        line = time.strftime("%d.%m %H:%M:%S") + "  " + msg
+        self.logs.setdefault(bot_id, deque(maxlen=300)).append(line)
+        logger.info("[бот %s] %s", bot_id, msg)
+
+    def lock(self, bot_id: int) -> asyncio.Lock:
+        return self.locks.setdefault(bot_id, asyncio.Lock())
+
+    def is_running(self, bot_id: int) -> bool:
+        t = self.tasks.get(bot_id)
+        return t is not None and not t.done()
+
+    async def build(self, bot: Dict[str, Any]) -> Tuple[Trader, Any]:
+        mode, market = bot["mode"], bot["market"]
+        if mode == "live" and not config.ALLOW_LIVE:
+            raise RuntimeError("Реальная торговля выключена. Чтобы включить, "
+                               "поставьте ALLOW_LIVE=1 в .env и перезапустите программу")
+        ex = await hub.get(market, "public" if mode == "paper" else mode)
+        if mode == "paper":
+            broker = PaperBroker(market)
+        else:
+            broker = ExchangeBroker(ex, market, bot["symbol"], bot["params"]["leverage"])
+            await broker.prepare()
+        sym = exchange_symbol(market, bot["symbol"])
+        if sym not in ex.markets:
+            raise ValueError(f"Пары {bot['symbol']} нет на Binance "
+                             f"({'спот' if market == 'spot' else 'фьючерсы USDⓈ-M'})")
+        state = bot["state"]
+        bot_id = bot["id"]
+
+        async def record(t: Dict[str, Any]) -> None:
+            db.add_trade(bot_id, t)
+            db.save_state(bot_id, state)
+
+        trader = Trader(bot, broker, state, record, lambda m: self.log(bot_id, m))
+        return trader, ex
+
+    # ---------- запуск и остановка ----------
+
+    async def startup(self) -> None:
+        for bot in db.list_bots():
+            if bot["enabled"]:
+                self.tasks[bot["id"]] = asyncio.create_task(self._run(bot["id"]))
+
+    async def shutdown(self) -> None:
+        for bot_id in list(self.tasks):
+            t = self.tasks.pop(bot_id)
+            t.cancel()
+        await asyncio.sleep(0)
+
+    async def start(self, bot_id: int) -> None:
+        if self.is_running(bot_id):
+            return
+        bot = db.get_bot(bot_id)
+        if not bot:
+            raise KeyError(bot_id)
+        built = await self.build(bot)  # ошибки (нет ключей и т.п.) сразу уходят в интерфейс
+        db.set_enabled(bot_id, True)
+        self.tasks[bot_id] = asyncio.create_task(self._run(bot_id, built))
+
+    async def stop(self, bot_id: int) -> None:
+        db.set_enabled(bot_id, False)
+        t = self.tasks.pop(bot_id, None)
+        self.traders.pop(bot_id, None)
+        if t and not t.done():
+            t.cancel()
+            try:
+                await t
+            except (asyncio.CancelledError, Exception):
+                pass
+            self.log(bot_id, "Бот остановлен")
+
+    async def _run(self, bot_id: int, built: Optional[Tuple[Trader, Any]] = None) -> None:
+        while built is None:  # после перезапуска программы — пробуем, пока не получится
+            try:
+                built = await self.build(db.get_bot(bot_id))
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                self._error(bot_id, None, e)
+                await asyncio.sleep(60)
+        trader, ex = built
+        self.traders[bot_id] = built
+        self.log(bot_id, "Бот запущен")
+        while True:
+            try:
+                async with self.lock(bot_id):
+                    await self._tick(trader, ex)
+                delay = config.POLL_SECONDS
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                self._error(bot_id, trader.state, e)
+                delay = max(config.POLL_SECONDS, 30)
+            await asyncio.sleep(delay)
+
+    def _error(self, bot_id: int, state: Optional[dict], e: Exception) -> None:
+        msg = str(e) or type(e).__name__
+        if len(msg) > 300:
+            msg = msg[:300] + "…"
+        self.log(bot_id, "Ошибка: " + msg)
+        if state is None:
+            bot = db.get_bot(bot_id)
+            state = bot["state"] if bot else {}
+        state["error"] = msg
+        db.save_state(bot_id, state)
+
+    async def _tick(self, trader: Trader, ex) -> None:
+        bot, state = trader.bot, trader.state
+        sym = exchange_symbol(bot["market"], bot["symbol"])
+        tf_ms = ex.parse_timeframe(bot["timeframe"]) * 1000
+        ohlcv = await ex.fetch_ohlcv(sym, bot["timeframe"], limit=500)
+        if len(ohlcv) < 3:
+            raise RuntimeError("Биржа вернула слишком мало свечей")
+        now = now_ms()
+        # последняя свеча обычно ещё формируется — сигнал считаем только по закрытым
+        closed = ohlcv if ohlcv[-1][0] + tf_ms <= now else ohlcv[:-1]
+        price = float(ohlcv[-1][4])
+        state["last_price"] = price
+        state["last_tick"] = now
+
+        await trader.on_price(price, now)
+
+        last_ts = closed[-1][0]
+        if state.get("last_candle_ts") != last_ts:
+            state["last_candle_ts"] = last_ts  # сначала отмечаем: одна свеча — максимум одна попытка
+            closes = [float(c[4]) for c in closed]
+            ind = prepare(closes, trader.p)
+            await trader.on_candle(ind, len(closes) - 1, price, now)
+
+        state["error"] = None
+        db.save_state(bot["id"], state)
+
+    # ---------- ручные действия ----------
+
+    async def _trader_for(self, bot_id: int) -> Tuple[Trader, Any]:
+        if self.is_running(bot_id) and bot_id in self.traders:
+            return self.traders[bot_id]
+        bot = db.get_bot(bot_id)
+        if not bot:
+            raise KeyError(bot_id)
+        return await self.build(bot)
+
+    async def close_position(self, bot_id: int) -> None:
+        async with self.lock(bot_id):
+            trader, ex = await self._trader_for(bot_id)
+            if not trader.pos:
+                raise ValueError("Открытой позиции нет")
+            bot = trader.bot
+            ticker = await ex.fetch_ticker(exchange_symbol(bot["market"], bot["symbol"]))
+            await trader.close(float(ticker["last"]), "вручную", now_ms())
+            db.save_state(bot_id, trader.state)
+
+    async def forget_position(self, bot_id: int) -> None:
+        """Убрать позицию из памяти бота без сделки (если закрыли её сами на бирже)."""
+        async with self.lock(bot_id):
+            if self.is_running(bot_id) and bot_id in self.traders:
+                state = self.traders[bot_id][0].state
+            else:
+                state = db.get_bot(bot_id)["state"]
+            state["position"] = None
+            db.save_state(bot_id, state)
+            self.log(bot_id, "Позиция убрана из памяти бота без сделки")
+
+
+manager = Manager()

@@ -1,0 +1,797 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Боты Binance</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📈</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --paper: #EDF0EC;
+  --surface: #F8FAF7;
+  --ink: #17212B;
+  --muted: #5E6B73;
+  --rule: #CDD5D0;
+  --accent: #2B47C9;
+  --accent-ink: #FFFFFF;
+  --profit: #17784A;
+  --loss: #B42E24;
+  --warn: #9A6A00;
+  --warn-bg: #FBEFC9;
+  --font: "Golos Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #16202A;
+    --surface: #1D2933;
+    --ink: #E6ECE8;
+    --muted: #93A3AB;
+    --rule: #2E3D48;
+    --accent: #8197FF;
+    --accent-ink: #0E1530;
+    --profit: #4CC38A;
+    --loss: #F0776B;
+    --warn: #F2C14E;
+    --warn-bg: #3A3220;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--paper); color: var(--ink);
+  font: 400 15px/1.5 var(--font); font-variant-numeric: tabular-nums;
+  padding: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0) env(safe-area-inset-bottom, 0) env(safe-area-inset-left, 0);
+}
+main { max-width: 1040px; margin: 0 auto; padding: 32px 20px 64px; }
+h1 { font-size: 30px; line-height: 1.15; font-weight: 700; letter-spacing: -0.02em; margin: 0; }
+h2 { font-size: 19px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+h3 { font-size: 15px; font-weight: 600; margin: 0 0 10px; }
+a { color: var(--accent); }
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.btn {
+  border: 1px solid var(--rule); background: var(--surface); border-radius: 8px;
+  padding: 7px 14px; cursor: pointer; font-weight: 500; white-space: nowrap;
+}
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn.danger { color: var(--loss); }
+.btn:disabled { opacity: .5; cursor: default; }
+.link { border: 0; background: none; padding: 2px 0; color: var(--muted); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--rule); }
+.link:hover { color: var(--ink); text-decoration-color: currentColor; }
+.link.danger:hover { color: var(--loss); }
+
+.top { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 8px; }
+.summary { color: var(--muted); margin: 6px 0 0; }
+.summary b { color: var(--ink); font-weight: 600; }
+.pos { color: var(--profit); } .neg { color: var(--loss); }
+
+.banner { background: var(--warn-bg); color: var(--warn); border-radius: 8px; padding: 10px 14px; margin: 18px 0 0; font-weight: 500; }
+
+/* ---------- список ботов ---------- */
+.bots { margin-top: 28px; border-top: 1px solid var(--rule); }
+.bot { position: relative; padding: 22px 0 22px 20px; border-bottom: 1px solid var(--rule); }
+.bot::before { content: ""; position: absolute; left: 0; top: 22px; bottom: 22px; width: 3px; border-radius: 2px; background: var(--rule); }
+.bot.running::before { background: var(--accent); }
+.bot.error::before { background: var(--loss); }
+.bot-head { display: flex; gap: 16px; align-items: baseline; justify-content: space-between; flex-wrap: wrap; }
+.bot-title { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+.pair { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; }
+.name { color: var(--muted); }
+.tags { display: flex; gap: 6px; flex-wrap: wrap; }
+.tag { font-size: 13px; padding: 1px 8px; border-radius: 99px; border: 1px solid var(--rule); color: var(--muted); }
+.tag.live { background: var(--warn-bg); border-color: transparent; color: var(--warn); font-weight: 600; }
+.tag.on { color: var(--accent); border-color: currentColor; }
+.bot-actions { display: flex; gap: 14px; align-items: center; }
+.recipe { margin: 4px 0 0; color: var(--muted); }
+.err { color: var(--loss); margin: 10px 0 0; }
+.facts { display: flex; flex-wrap: wrap; gap: 6px 28px; margin-top: 14px; }
+.fact { min-width: 120px; }
+.fact span { display: block; font-size: 13px; color: var(--muted); }
+.fact b { font-weight: 600; font-size: 16px; }
+.waiting { margin-top: 14px; }
+.subtle { color: var(--muted); font-size: 13px; }
+.bot-links { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 14px; }
+
+/* лестница позиции: стоп, усреднения, средняя, цена, тейк на одной шкале */
+.ladder { position: relative; height: 58px; margin: 18px 6px 4px; }
+.ladder .track { position: absolute; left: 0; right: 0; top: 28px; height: 2px; background: var(--rule); }
+.ladder .zone { position: absolute; top: 25px; height: 8px; border-radius: 2px; opacity: .28; }
+.ladder .tick { position: absolute; top: 21px; width: 0; height: 16px; border-left: 2px solid var(--ink); transform: translateX(-1px); }
+.ladder .tick.so { height: 12px; top: 23px; border-left-color: var(--muted); }
+.ladder .tick.so.pending { border-left-style: dotted; }
+.ladder .tick.tp { border-left-color: var(--profit); height: 20px; top: 19px; }
+.ladder .tick.sl { border-left-color: var(--loss); height: 20px; top: 19px; }
+.ladder .dot { position: absolute; top: 22px; width: 14px; height: 14px; margin-left: -7px; border-radius: 50%; background: var(--accent); border: 3px solid var(--surface); box-shadow: 0 0 0 1px var(--accent); }
+.ladder .lbl { position: absolute; font-size: 12px; line-height: 1; white-space: nowrap; color: var(--muted); transform: translateX(-50%); }
+.ladder .lbl.below { top: 44px; }
+.ladder .lbl.above { top: 2px; color: var(--ink); font-weight: 600; }
+.ladder .lbl.l { transform: none; } .ladder .lbl.r { transform: translateX(-100%); }
+.ladder .lbl.tp { color: var(--profit); } .ladder .lbl.sl { color: var(--loss); }
+
+.empty { padding: 40px 0; }
+.empty p { color: var(--muted); max-width: 60ch; }
+
+/* ---------- сделки ---------- */
+.section { margin-top: 48px; }
+.section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.table-wrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+th { font-weight: 500; color: var(--muted); }
+td.num, th.num { text-align: right; }
+tr:last-child td { border-bottom: 0; }
+
+/* ---------- редактор ---------- */
+dialog { border: 0; padding: 0; color: var(--ink); background: var(--surface); }
+dialog::backdrop { background: rgba(10, 20, 30, .45); }
+dialog.drawer { margin: 0 0 0 auto; height: 100%; max-height: 100%; width: min(600px, 100vw); }
+dialog.drawer[open] { animation: slide .22s ease-out; }
+@keyframes slide { from { transform: translateX(40px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { dialog.drawer[open] { animation: none; } }
+.drawer-inner { display: flex; flex-direction: column; height: 100%; }
+.drawer-head { padding: 20px 24px 14px; border-bottom: 1px solid var(--rule); display: flex; justify-content: space-between; align-items: center; gap: 12px; padding-top: calc(20px + env(safe-area-inset-top, 0px)); }
+.drawer-body { overflow-y: auto; padding: 8px 24px 24px; flex: 1; }
+.drawer-foot { padding: 14px 24px; border-top: 1px solid var(--rule); display: flex; gap: 10px; justify-content: flex-end; padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
+fieldset { border: 0; padding: 0; margin: 22px 0 0; min-width: 0; }
+legend { font-weight: 600; font-size: 16px; padding: 0; margin-bottom: 10px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px 14px; }
+label.f { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+label.f.wide { grid-column: 1 / -1; }
+input[type=text], input[type=number], select {
+  background: var(--paper); border: 1px solid var(--rule); border-radius: 7px; padding: 7px 9px; width: 100%; color: var(--ink);
+}
+input:focus, select:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent); }
+.seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; }
+.seg label { padding: 6px 14px; cursor: pointer; color: var(--muted); }
+.seg input { position: absolute; opacity: 0; pointer-events: none; }
+.seg label:has(input:checked) { background: var(--ink); color: var(--paper); }
+.seg label:has(input:disabled) { opacity: .4; cursor: default; }
+.seg label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
+.modes { display: grid; gap: 8px; }
+.mode { display: flex; gap: 10px; align-items: flex-start; border: 1px solid var(--rule); border-radius: 9px; padding: 10px 12px; cursor: pointer; }
+.mode:has(input:checked) { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.mode:has(input:disabled) { opacity: .5; cursor: default; }
+.mode input { margin-top: 4px; accent-color: var(--accent); }
+.mode b { font-weight: 600; display: block; }
+.mode span { font-size: 13px; color: var(--muted); }
+.check { display: flex; gap: 8px; align-items: center; margin-top: 12px; }
+.check input { accent-color: var(--accent); width: 16px; height: 16px; }
+.hint { font-size: 13px; color: var(--muted); margin: 10px 0 0; }
+.hint.warn { color: var(--warn); }
+.preset-about { font-size: 13px; color: var(--muted); margin: 8px 0 0; }
+.bt { margin-top: 14px; }
+.bt-row { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; }
+.bt-row label.f { width: 190px; }
+.bt-result { margin-top: 16px; }
+.bt-lead { font-size: 15px; margin: 0 0 12px; }
+.bt-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px 14px; }
+.bt-stats span { display: block; font-size: 12px; color: var(--muted); }
+.bt-stats b { font-weight: 600; }
+.chart { position: relative; margin-top: 16px; height: 150px; border-left: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+.chart svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.chart .ax { position: absolute; left: 6px; font-size: 11px; color: var(--muted); }
+.bt-trades { margin-top: 14px; font-size: 13px; }
+.bt-trades td { padding: 5px 8px; }
+
+pre.logs { white-space: pre-wrap; font-size: 13px; line-height: 1.55; margin: 0; }
+.toast { position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--ink); color: var(--paper); padding: 10px 16px; border-radius: 9px; max-width: min(560px, 92vw); z-index: 10; display: none; }
+.toast.show { display: block; }
+.toast.bad { background: var(--loss); color: #fff; }
+
+@media (max-width: 600px) {
+  main { padding: 22px 14px 48px; }
+  h1 { font-size: 26px; }
+  .bot { padding-left: 14px; }
+  .drawer-body, .drawer-head, .drawer-foot { padding-left: 16px; padding-right: 16px; }
+}
+</style>
+</head>
+<body>
+<main>
+  <div class="top">
+    <div>
+      <h1>Боты Binance</h1>
+      <p class="summary" id="summary">Загрузка…</p>
+    </div>
+    <button class="btn primary" id="newBot">Новый бот</button>
+  </div>
+  <div id="banner"></div>
+  <div class="bots" id="bots"></div>
+
+  <section class="section">
+    <div class="section-head">
+      <h2>Сделки</h2>
+      <select id="tradeFilter" aria-label="Показать сделки бота" style="width:auto"></select>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Время</th><th>Бот</th><th>Действие</th><th class="num">Цена</th><th class="num">Объём</th><th class="num">Комиссия</th><th class="num">Результат</th><th>Причина</th></tr></thead>
+        <tbody id="trades"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<dialog class="drawer" id="editor">
+  <form class="drawer-inner" id="form" novalidate>
+    <div class="drawer-head">
+      <h2 id="editorTitle">Новый бот</h2>
+      <button type="button" class="link" data-close>Закрыть</button>
+    </div>
+    <div class="drawer-body">
+      <fieldset style="margin-top:14px">
+        <label class="f wide">Начать с шаблона
+          <select id="preset"></select>
+        </label>
+        <p class="preset-about" id="presetAbout"></p>
+      </fieldset>
+
+      <fieldset>
+        <legend>Что торговать</legend>
+        <div class="grid">
+          <label class="f">Пара
+            <input type="text" name="symbol" list="pairs" placeholder="BTC/USDT" autocomplete="off" required>
+          </label>
+          <label class="f">Свечи
+            <select name="timeframe" id="tf"></select>
+          </label>
+          <label class="f">Название
+            <input type="text" name="bot_name" placeholder="необязательно">
+          </label>
+        </div>
+        <div style="margin-top:14px">
+          <div class="seg" role="radiogroup" aria-label="Рынок">
+            <label><input type="radio" name="market" value="spot" checked>Спот</label>
+            <label><input type="radio" name="market" value="futures">Фьючерсы USDⓈ-M</label>
+          </div>
+        </div>
+        <div class="modes" style="margin-top:14px" role="radiogroup" aria-label="Режим">
+          <label class="mode"><input type="radio" name="mode" value="paper" checked><div><b>Бумажная торговля</b><span>Реальные цены Binance, сделки понарошку. Ключи не нужны.</span></div></label>
+          <label class="mode"><input type="radio" name="mode" value="demo"><div><b>Демо-счёт Binance</b><span id="demoNote">Настоящие ордера на тестовые деньги. Нужны ключи с demo.binance.com.</span></div></label>
+          <label class="mode"><input type="radio" name="mode" value="live"><div><b>Реальные деньги</b><span id="liveNote">Ордера на вашем счёте Binance.</span></div></label>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Когда входить</legend>
+        <div class="grid">
+          <label class="f">Сигнал
+            <select name="signal">
+              <option value="rsi">RSI</option>
+              <option value="ema_cross">Пересечение EMA</option>
+              <option value="none">Без сигнала, входить сразу</option>
+            </select>
+          </label>
+          <label class="f" data-sig="rsi">Период RSI<input type="number" name="rsi_period" min="2" max="100" step="1"></label>
+          <label class="f" data-sig="rsi"><span id="rsiLowLbl">Лонг при RSI ниже</span><input type="number" name="rsi_low" min="1" max="99" step="1"></label>
+          <label class="f" data-sig="rsi"><span id="rsiHighLbl">Шорт при RSI выше</span><input type="number" name="rsi_high" min="1" max="99" step="1"></label>
+          <label class="f" data-sig="ema_cross">Быстрая EMA<input type="number" name="ema_fast" min="2" max="200" step="1"></label>
+          <label class="f" data-sig="ema_cross">Медленная EMA<input type="number" name="ema_slow" min="3" max="400" step="1"></label>
+        </div>
+        <div style="margin-top:14px">
+          <div class="seg" role="radiogroup" aria-label="Направление">
+            <label><input type="radio" name="direction" value="long" checked>Только лонг</label>
+            <label><input type="radio" name="direction" value="short">Только шорт</label>
+            <label><input type="radio" name="direction" value="both">Оба</label>
+          </div>
+        </div>
+        <p class="hint" id="dirHint"></p>
+      </fieldset>
+
+      <fieldset>
+        <legend>Объём</legend>
+        <div class="grid">
+          <label class="f">Первый ордер, USDT<input type="number" name="order_size" min="1" step="any"></label>
+          <label class="f" id="levField">Плечо<input type="number" name="leverage" min="1" max="20" step="1"></label>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Усреднения</legend>
+        <div class="grid">
+          <label class="f">Сколько<input type="number" name="safety_orders" min="0" max="15" step="1"></label>
+          <label class="f" data-so>Шаг первого, %<input type="number" name="so_step_pct" min="0.1" step="any"></label>
+          <label class="f" data-so>Рост шага, ×<input type="number" name="so_step_scale" min="0.5" max="3" step="any"></label>
+          <label class="f" data-so>Рост объёма, ×<input type="number" name="so_volume_mult" min="0.5" max="5" step="any"></label>
+        </div>
+        <p class="hint" id="soHint"></p>
+      </fieldset>
+
+      <fieldset>
+        <legend>Когда выходить</legend>
+        <div class="grid">
+          <label class="f">Тейк-профит, %<input type="number" name="take_profit_pct" min="0" step="any"></label>
+          <label class="f">Стоп-лосс, %<input type="number" name="stop_loss_pct" min="0" step="any"></label>
+        </div>
+        <label class="check"><input type="checkbox" name="exit_on_opposite">Закрывать по противоположному сигналу</label>
+        <p class="hint">Тейк и стоп считаются от средней цены входа. 0 — выключено.</p>
+        <p class="hint warn" id="exitWarn"></p>
+      </fieldset>
+
+      <fieldset>
+        <legend>Проверка на истории</legend>
+        <div class="bt-row">
+          <label class="f">Сколько свечей
+            <select id="btCandles">
+              <option value="1000">1000</option>
+              <option value="3000" selected>3000</option>
+              <option value="6000">6000</option>
+              <option value="10000">10000</option>
+            </select>
+          </label>
+          <button type="button" class="btn" id="runBt">Проверить на истории</button>
+        </div>
+        <p class="hint" id="btPeriod"></p>
+        <div class="bt-result" id="btResult"></div>
+      </fieldset>
+    </div>
+    <div class="drawer-foot">
+      <button type="button" class="btn" data-close>Отмена</button>
+      <button type="submit" class="btn primary" id="saveBtn">Сохранить бота</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog class="drawer" id="logDialog">
+  <div class="drawer-inner">
+    <div class="drawer-head"><h2 id="logTitle">Журнал</h2><button type="button" class="link" data-close>Закрыть</button></div>
+    <div class="drawer-body"><pre class="logs" id="logBody"></pre></div>
+  </div>
+</dialog>
+
+<datalist id="pairs">
+  <option value="BTC/USDT"><option value="ETH/USDT"><option value="SOL/USDT"><option value="BNB/USDT">
+  <option value="XRP/USDT"><option value="DOGE/USDT"><option value="TON/USDT"><option value="ADA/USDT">
+</datalist>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const S = { meta: null, bots: [], editing: null, lastBotsJson: "", tradeFilter: "" };
+
+const MODE_NAME = { paper: "Бумажная", demo: "Демо-счёт", live: "Реальные деньги" };
+const MARKET_NAME = { spot: "Спот", futures: "Фьючерсы" };
+const ACTION_NAME = { open: "Вход", safety: "Усреднение", close: "Выход" };
+const TF_MIN = { "1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30, "1h": 60, "2h": 120, "4h": 240, "1d": 1440 };
+
+// ---------- утилиты ----------
+function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+function num(v, frac) {
+  if (v == null || !isFinite(v)) return "—";
+  const a = Math.abs(v);
+  const f = frac ?? (a >= 1000 ? 2 : a >= 1 ? 4 : a >= 0.01 ? 5 : 8);
+  return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: f }).format(v);
+}
+function usdt(v) { return v == null ? "—" : (v > 0 ? "+" : v < 0 ? "−" : "") + num(Math.abs(v), 2) + " USDT"; }
+function pct(v) { return v == null ? "—" : (v > 0 ? "+" : v < 0 ? "−" : "") + num(Math.abs(v), 2) + "%"; }
+function cls(v) { return v > 0 ? "pos" : v < 0 ? "neg" : ""; }
+function when(ts) { return ts ? new Date(ts).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—"; }
+function ago(ts) {
+  if (!ts) return "";
+  const s = Math.round((Date.now() - ts) / 1000);
+  return s < 60 ? `${s} с назад` : s < 3600 ? `${Math.round(s / 60)} мин назад` : `${Math.round(s / 3600)} ч назад`;
+}
+function duration(ms) {
+  if (ms == null) return "—";
+  const h = ms / 3.6e6;
+  return h < 1 ? `${Math.round(h * 60)} мин` : h < 48 ? `${num(h, 1)} ч` : `${num(h / 24, 1)} дн`;
+}
+function toast(msg, bad = false) {
+  const t = $("#toast");
+  t.textContent = msg; t.className = "toast show" + (bad ? " bad" : "");
+  clearTimeout(toast.t); toast.t = setTimeout(() => t.className = "toast", bad ? 7000 : 3000);
+}
+async function api(path, opts = {}) {
+  const r = await fetch(path, { headers: { "Content-Type": "application/json" }, ...opts, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  let data = null;
+  try { data = await r.json(); } catch {}
+  if (!r.ok) throw new Error((data && (typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail))) || `Ошибка ${r.status}`);
+  return data;
+}
+
+// ---------- описание стратегии простыми словами ----------
+function recipe(b) {
+  const p = b.params, parts = [];
+  const both = p.direction === "both";
+  if (p.signal === "rsi") {
+    if (both) parts.push(`лонг при RSI(${p.rsi_period}) ниже ${num(p.rsi_low)}, шорт выше ${num(p.rsi_high)}`);
+    else if (p.direction === "short") parts.push(`шорт, когда RSI(${p.rsi_period}) выше ${num(p.rsi_high)}`);
+    else parts.push(`покупка, когда RSI(${p.rsi_period}) ниже ${num(p.rsi_low)}`);
+  } else if (p.signal === "ema_cross") {
+    parts.push(`вход по пересечению EMA ${p.ema_fast} и ${p.ema_slow}` + (both ? " в обе стороны" : p.direction === "short" ? ", только шорт" : ", только лонг"));
+  } else parts.push(p.direction === "short" ? "шорт сразу, без сигнала" : "покупка сразу, без сигнала");
+  if (p.safety_orders > 0) parts.push(`${p.safety_orders} усредн. с шагом ${num(p.so_step_pct)}%`);
+  if (p.take_profit_pct > 0) parts.push(`тейк ${num(p.take_profit_pct)}%`);
+  if (p.stop_loss_pct > 0) parts.push(`стоп ${num(p.stop_loss_pct)}%`);
+  if (p.exit_on_opposite && p.signal !== "none") parts.push("выход по обратному сигналу");
+  if (b.market === "futures" && p.leverage > 1) parts.push(`плечо ${p.leverage}×`);
+  const s = parts.join(", ");
+  return s.charAt(0).toUpperCase() + s.slice(1) + `. Свечи ${b.timeframe}, первый ордер ${num(p.order_size, 2)} USDT.`;
+}
+
+function indicatorText(b) {
+  const ind = b.state.indicator || {};
+  if (b.params.signal === "rsi" && ind.rsi != null) return `RSI ${num(ind.rsi, 1)}`;
+  if (b.params.signal === "ema_cross" && ind.ema_fast != null) return `EMA ${b.params.ema_fast}: ${num(ind.ema_fast)}, EMA ${b.params.ema_slow}: ${num(ind.ema_slow)}`;
+  return "";
+}
+
+// ---------- лестница позиции ----------
+function ladder(b) {
+  const L = b.levels, price = b.state.last_price;
+  if (!L || price == null) return "";
+  const pts = [price, L.avg, ...(L.so.map(s => s.price))];
+  if (L.tp) pts.push(L.tp);
+  if (L.sl) pts.push(L.sl);
+  let lo = Math.min(...pts), hi = Math.max(...pts);
+  const pad = (hi - lo) * 0.04 || hi * 0.005;
+  lo -= pad; hi += pad;
+  const x = v => ((v - lo) / (hi - lo)) * 100;
+  const side = b.state.position.side;
+  const inProfit = side === "long" ? price >= L.avg : price <= L.avg;
+  let h = `<div class="ladder" role="img" aria-label="Позиция: средняя ${num(L.avg)}, цена ${num(price)}">`;
+  h += `<div class="track"></div>`;
+  const z0 = Math.min(x(price), x(L.avg)), z1 = Math.max(x(price), x(L.avg));
+  h += `<div class="zone" style="left:${z0}%;width:${z1 - z0}%;background:var(${inProfit ? "--profit" : "--loss"})"></div>`;
+  L.so.forEach((s, i) => h += `<div class="tick so ${s.filled ? "" : "pending"}" style="left:${x(s.price)}%" title="Усреднение ${i + 1}: ${num(s.price)}${s.filled ? ", исполнено" : ""}"></div>`);
+  if (L.sl) h += `<div class="tick sl" style="left:${x(L.sl)}%" title="Стоп-лосс ${num(L.sl)}"></div>`;
+  if (L.tp) h += `<div class="tick tp" style="left:${x(L.tp)}%" title="Тейк-профит ${num(L.tp)}"></div>`;
+  h += `<div class="tick" style="left:${x(L.avg)}%" title="Средняя цена ${num(L.avg)}"></div>`;
+  h += `<div class="dot" style="left:${x(price)}%" title="Цена сейчас ${num(price)}"></div>`;
+  // подписи снизу: показываем по важности и не даём им налезать друг на друга
+  const below = [{ v: L.avg, t: `средняя ${num(L.avg)}`, c: "" }];
+  if (L.tp) below.push({ v: L.tp, t: `тейк ${num(L.tp)}`, c: "tp" });
+  if (L.sl) below.push({ v: L.sl, t: `стоп ${num(L.sl)}`, c: "sl" });
+  const placed = [];
+  const cw = Math.min(1000, (document.documentElement.clientWidth || 1000) - 60);
+  const gap = 140 / cw * 100; // примерная ширина подписи в процентах от шкалы
+  for (const lb of below) {
+    const px = x(lb.v);
+    if (placed.some(p => Math.abs(p - px) < gap)) continue;
+    placed.push(px);
+    h += `<div class="lbl below ${lb.c} ${edge(px)}" style="left:${px}%">${lb.t}</div>`;
+  }
+  const pp = x(price);
+  h += `<div class="lbl above ${edge(pp)}" style="left:${pp}%">${num(price)}</div>`;
+  return h + `</div>`;
+}
+function edge(px) { return px < 10 ? "l" : px > 90 ? "r" : ""; }
+
+// ---------- список ботов ----------
+function renderBots() {
+  const bots = S.bots;
+  const running = bots.filter(b => b.running).length;
+  const total = bots.reduce((a, b) => a + (b.state.stats?.pnl || 0), 0);
+  const open = bots.reduce((a, b) => a + (b.unrealized || 0), 0);
+  $("#summary").innerHTML = bots.length
+    ? `Работают <b>${running}</b> из ${bots.length}. Закрытые сделки: <b class="${cls(total)}">${usdt(total)}</b>, открытые позиции: <b class="${cls(open)}">${usdt(open)}</b>.`
+    : "Пока нет ни одного бота.";
+  const liveRunning = bots.some(b => b.running && b.mode === "live");
+  $("#banner").innerHTML = liveRunning ? `<p class="banner">Идёт торговля реальными деньгами.</p>` : "";
+
+  if (!bots.length) {
+    $("#bots").innerHTML = `<div class="empty"><h2>Создайте первого бота</h2>
+      <p>Начните с бумажной торговли: бот будет следить за настоящими ценами Binance, но сделки останутся понарошку. Перед запуском проверьте стратегию на истории.</p>
+      <button class="btn primary" data-act="new">Новый бот</button></div>`;
+    return;
+  }
+  $("#bots").innerHTML = bots.map(botHtml).join("");
+}
+
+function botHtml(b) {
+  const st = b.state, pos = st.position, p = b.params;
+  const stats = st.stats || { closed: 0, wins: 0, pnl: 0 };
+  const status = b.running ? (st.error ? "error" : "running") : "";
+  let body;
+  if (pos) {
+    const pnlPct = b.unrealized != null && pos.margin ? b.unrealized / pos.margin * 100 : null;
+    const base = b.symbol.split("/")[0];
+    body = ladder(b) + `<div class="facts">
+      <div class="fact"><span>Позиция</span><b>${pos.side === "long" ? "Лонг" : "Шорт"} ${num(pos.qty)} ${esc(base)}</b></div>
+      <div class="fact"><span>Средняя цена</span><b>${num(pos.avg)}</b></div>
+      <div class="fact"><span>Сейчас</span><b class="${cls(b.unrealized)}">${usdt(b.unrealized)} (${pct(pnlPct)})</b></div>
+      ${p.safety_orders ? `<div class="fact"><span>Усреднения</span><b>${pos.so_filled} из ${p.safety_orders}</b></div>` : ""}
+      <div class="fact"><span>В сделке</span><b>${num(pos.margin, 2)} из ${num(b.max_margin, 2)} USDT</b></div>
+    </div>`;
+  } else {
+    const ind = indicatorText(b);
+    const pr = st.last_price != null ? `цена ${num(st.last_price)}` : "";
+    const what = [ind, pr].filter(Boolean).join(", ");
+    body = `<p class="waiting">${b.running ? "Ждёт сигнала" : "Позиции нет"}${what ? `. Сейчас ${what}` : ""}.</p>`;
+  }
+  const result = `<div class="facts">
+      <div class="fact"><span>Закрыто сделок</span><b>${stats.closed}${stats.closed ? `, в плюсе ${stats.wins}` : ""}</b></div>
+      <div class="fact"><span>Итог закрытых</span><b class="${cls(stats.pnl)}">${usdt(stats.pnl)}</b></div>
+    </div>`;
+  const links = [
+    `<button class="link" data-act="edit" data-id="${b.id}" ${b.running ? "disabled title='Сначала остановите бота'" : ""}>Изменить</button>`,
+    `<button class="link" data-act="logs" data-id="${b.id}">Журнал</button>`,
+    pos ? `<button class="link danger" data-act="close" data-id="${b.id}">Закрыть позицию по рынку</button>` : "",
+    pos && !b.running ? `<button class="link" data-act="forget" data-id="${b.id}">Убрать позицию из памяти</button>` : "",
+    !b.running && !pos ? `<button class="link danger" data-act="delete" data-id="${b.id}">Удалить</button>` : "",
+  ].join("");
+  return `<article class="bot ${status}">
+    <div class="bot-head">
+      <div class="bot-title">
+        <span class="pair">${esc(b.symbol)}</span>
+        <div class="tags">
+          <span class="tag">${MARKET_NAME[b.market]}</span>
+          <span class="tag ${b.mode === "live" ? "live" : ""}">${MODE_NAME[b.mode]}</span>
+          <span class="tag ${b.running ? "on" : ""}">${b.running ? "Работает" : "Остановлен"}</span>
+        </div>
+      </div>
+      <div class="bot-actions">
+        <span class="subtle">${b.running && st.last_tick ? "обновлено " + ago(st.last_tick) : ""}</span>
+        ${b.running
+          ? `<button class="btn" data-act="stop" data-id="${b.id}">Остановить</button>`
+          : `<button class="btn primary" data-act="start" data-id="${b.id}">Запустить</button>`}
+      </div>
+    </div>
+    <div class="name">${esc(b.name)}</div>
+    <p class="recipe">${esc(recipe(b))}</p>
+    ${st.error && b.running ? `<p class="err">Ошибка: ${esc(st.error)}</p>` : ""}
+    ${body}
+    ${result}
+    <div class="bot-links">${links}</div>
+  </article>`;
+}
+
+async function loadBots(force = false) {
+  try {
+    const bots = await api("/api/bots");
+    const json = JSON.stringify(bots);
+    if (!force && json === S.lastBotsJson) return;
+    S.lastBotsJson = json; S.bots = bots;
+    renderBots(); renderTradeFilter();
+  } catch (e) { $("#summary").textContent = "Нет связи с программой бота: " + e.message; }
+}
+
+// ---------- сделки ----------
+function renderTradeFilter() {
+  const sel = $("#tradeFilter"), cur = S.tradeFilter;
+  sel.innerHTML = `<option value="">Все боты</option>` + S.bots.map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join("");
+  sel.value = cur;
+}
+async function loadTrades() {
+  try {
+    const q = S.tradeFilter ? `?bot_id=${S.tradeFilter}` : "";
+    const rows = await api("/api/trades" + q);
+    const names = Object.fromEntries(S.bots.map(b => [b.id, b.name]));
+    $("#trades").innerHTML = rows.length ? rows.map(t => `<tr>
+      <td>${when(t.ts)}</td><td>${esc(names[t.bot_id] || "#" + t.bot_id)}</td>
+      <td>${ACTION_NAME[t.action] || t.action} ${t.side === "long" ? "лонг" : "шорт"}</td>
+      <td class="num">${num(t.price)}</td><td class="num">${num(t.amount)}</td>
+      <td class="num">${num(t.fee, 4)}</td>
+      <td class="num ${cls(t.pnl)}">${t.pnl == null ? "" : usdt(t.pnl)}</td>
+      <td>${esc(t.reason || "")}</td></tr>`).join("")
+      : `<tr><td colspan="8" class="subtle">Сделок пока нет. Они появятся здесь, когда бот войдёт в позицию.</td></tr>`;
+  } catch {}
+}
+
+// ---------- действия ----------
+$("#bots").addEventListener("click", async e => {
+  const btn = e.target.closest("[data-act]");
+  if (!btn || btn.disabled) return;
+  const id = +btn.dataset.id, act = btn.dataset.act, bot = S.bots.find(b => b.id === id);
+  try {
+    if (act === "new") return openEditor(null);
+    if (act === "edit") return openEditor(bot);
+    if (act === "logs") return openLogs(bot);
+    if (act === "start") {
+      if (bot.mode === "live" && !confirm(`Бот ${bot.symbol} будет торговать реальными деньгами на вашем счёте Binance. Запустить?`)) return;
+      btn.disabled = true; await api(`/api/bots/${id}/start`, { method: "POST" }); toast("Бот запущен");
+    }
+    if (act === "stop") { btn.disabled = true; await api(`/api/bots/${id}/stop`, { method: "POST" }); toast("Бот остановлен. Открытая позиция осталась на месте."); }
+    if (act === "close") {
+      if (!confirm("Закрыть позицию по рыночной цене прямо сейчас?")) return;
+      btn.disabled = true; await api(`/api/bots/${id}/close`, { method: "POST" }); toast("Позиция закрыта");
+    }
+    if (act === "forget") {
+      if (!confirm("Бот забудет о позиции, ордер на бирже не отправится. Используйте это, если уже закрыли позицию на Binance сами. Продолжить?")) return;
+      await api(`/api/bots/${id}/forget`, { method: "POST" }); toast("Позиция убрана из памяти бота");
+    }
+    if (act === "delete") {
+      if (!confirm(`Удалить бота «${bot.name}» вместе с историей сделок?`)) return;
+      await api(`/api/bots/${id}`, { method: "DELETE" }); toast("Бот удалён");
+    }
+    await loadBots(true); loadTrades();
+  } catch (err) { toast(err.message, true); btn.disabled = false; }
+});
+$("#newBot").onclick = () => openEditor(null);
+$("#tradeFilter").onchange = e => { S.tradeFilter = e.target.value; loadTrades(); };
+$$("[data-close]").forEach(b => b.onclick = () => b.closest("dialog").close());
+
+async function openLogs(bot) {
+  $("#logTitle").textContent = "Журнал: " + bot.name;
+  const lines = await api(`/api/bots/${bot.id}/logs`);
+  $("#logBody").textContent = lines.length ? lines.slice().reverse().join("\n") : "Записей пока нет. Журнал хранится, пока программа работает.";
+  $("#logDialog").showModal();
+}
+
+// ---------- редактор ----------
+const F = $("#form");
+const E = F.elements;
+const PARAM_FIELDS = ["signal", "rsi_period", "rsi_low", "rsi_high", "ema_fast", "ema_slow", "order_size", "leverage",
+  "take_profit_pct", "stop_loss_pct", "safety_orders", "so_step_pct", "so_step_scale", "so_volume_mult"];
+
+function setRadio(name, v) { const el = F.querySelector(`input[name=${name}][value="${v}"]`); if (el) el.checked = true; }
+function getRadio(name) { return F.querySelector(`input[name=${name}]:checked`)?.value; }
+
+function fillForm(bot) {
+  const p = { ...S.meta.defaults, ...(bot?.params || {}) };
+  E.symbol.value = bot?.symbol || "BTC/USDT";
+  E.bot_name.value = bot?.name || "";
+  E.timeframe.value = bot?.timeframe || "15m";
+  setRadio("market", bot?.market || "spot");
+  setRadio("mode", bot?.mode || "paper");
+  setRadio("direction", p.direction);
+  PARAM_FIELDS.forEach(k => E[k].value = p[k]);
+  E.exit_on_opposite.checked = !!p.exit_on_opposite;
+}
+function applyPreset(id) {
+  const pr = S.meta.presets.find(x => x.id === id);
+  $("#presetAbout").textContent = pr ? pr.about : "";
+  if (!pr) return;
+  const p = { ...S.meta.defaults, ...pr.params };
+  PARAM_FIELDS.forEach(k => { if (k !== "order_size") E[k].value = p[k]; });
+  E.exit_on_opposite.checked = !!p.exit_on_opposite;
+  setRadio("direction", p.direction);
+  E.timeframe.value = pr.timeframe;
+  syncForm();
+}
+function readForm() {
+  const params = {};
+  PARAM_FIELDS.forEach(k => params[k] = k === "signal" ? E[k].value : Number(E[k].value));
+  params.direction = getRadio("direction");
+  params.exit_on_opposite = E.exit_on_opposite.checked;
+  return { name: E.bot_name.value.trim(), symbol: E.symbol.value.trim(), timeframe: E.timeframe.value,
+           market: getRadio("market"), mode: getRadio("mode"), params };
+}
+function syncForm() {
+  const d = readForm(), p = d.params, fut = d.market === "futures";
+  $$("[data-sig]").forEach(el => el.hidden = el.dataset.sig !== p.signal);
+  $$("input[name=direction]").forEach(el => { if (el.value !== "long") el.disabled = !fut; });
+  if (!fut && p.direction !== "long") setRadio("direction", "long");
+  const both = F.querySelector("input[name=direction][value=both]");
+  both.disabled = !fut || p.signal === "none";
+  if (both.disabled && both.checked) setRadio("direction", "long");
+  $("#dirHint").textContent = fut ? "" : "На споте бот только покупает и продаёт купленное. Шорт доступен на фьючерсах.";
+  $("#levField").hidden = !fut;
+  const dir = getRadio("direction");
+  $("#rsiLowLbl").textContent = dir === "short" ? "Выход из шорта при RSI ниже" : dir === "both" ? "Лонг при RSI ниже" : "Покупка при RSI ниже";
+  $("#rsiHighLbl").textContent = dir === "long" ? "Продажа при RSI выше" : "Шорт при RSI выше";
+  $$("[data-so]").forEach(el => el.hidden = !(p.safety_orders > 0));
+
+  // подсказка про объём сделки
+  let dev = 0, total = 0;
+  for (let k = 0; k < p.safety_orders; k++) dev += p.so_step_pct * p.so_step_scale ** k;
+  for (let k = 0; k <= p.safety_orders; k++) total += p.order_size * p.so_volume_mult ** k;
+  const lev = fut ? p.leverage : 1;
+  $("#soHint").textContent = p.safety_orders > 0 && isFinite(total)
+    ? `Последнее усреднение на ${num(dev, 2)}% от цены входа. В одной сделке может оказаться до ${num(total, 2)} USDT${lev > 1 ? ` маржи (позиция ${num(total * lev, 2)} USDT)` : ""}. Держите эту сумму свободной.`
+    : isFinite(p.order_size) ? `В сделке ${num(p.order_size, 2)} USDT${lev > 1 ? ` маржи, позиция ${num(p.order_size * lev, 2)} USDT` : ""}.` : "";
+
+  const warns = [];
+  if (fut && lev > 1 && !(p.stop_loss_pct > 0)) warns.push("Без стоп-лосса при плече биржа может ликвидировать позицию.");
+  if (p.stop_loss_pct > 0 && p.safety_orders > 0 && p.stop_loss_pct <= dev) warns.push("Стоп ближе последнего усреднения: часть усреднений может не успеть сработать.");
+  if (p.signal === "none" && !(p.take_profit_pct > 0)) warns.push("Без сигнала боту нужен тейк-профит, иначе он не выйдет из сделки.");
+  $("#exitWarn").textContent = warns.join(" ");
+
+  // режимы
+  const m = S.meta;
+  const demo = F.querySelector("input[name=mode][value=demo]"), live = F.querySelector("input[name=mode][value=live]");
+  $("#demoNote").textContent = m.has_demo_keys ? "Настоящие ордера на тестовые деньги." : "Нужны ключи с demo.binance.com в файле .env.";
+  $("#liveNote").textContent = !m.live_allowed ? "Выключено. Чтобы включить, поставьте ALLOW_LIVE=1 в .env." : m.has_live_keys ? "Ордера на вашем счёте Binance." : "Нужны ключи API в файле .env.";
+  demo.disabled = !m.has_demo_keys && !demo.checked;
+  live.disabled = (!m.live_allowed || !m.has_live_keys) && !live.checked;
+
+  const n = +$("#btCandles").value, mins = n * (TF_MIN[d.timeframe] || 15);
+  $("#btPeriod").textContent = `Это примерно ${mins < 2880 ? num(mins / 60, 0) + " ч" : num(mins / 1440, 0) + " дн"} истории.`;
+}
+
+function openEditor(bot) {
+  S.editing = bot ? bot.id : null;
+  $("#editorTitle").textContent = bot ? `Настройки: ${bot.name}` : "Новый бот";
+  $("#saveBtn").textContent = bot ? "Сохранить изменения" : "Создать бота";
+  $("#btResult").innerHTML = "";
+  $("#preset").value = "";
+  $("#presetAbout").textContent = "";
+  fillForm(bot);
+  if (!bot) { $("#preset").value = "dca"; applyPreset("dca"); }
+  syncForm();
+  $("#editor").showModal();
+}
+
+F.addEventListener("input", syncForm);
+F.addEventListener("change", syncForm);
+$("#preset").onchange = e => applyPreset(e.target.value);
+F.addEventListener("submit", async e => {
+  e.preventDefault();
+  const d = readForm();
+  try {
+    if (S.editing) await api(`/api/bots/${S.editing}`, { method: "PUT", body: d });
+    else await api("/api/bots", { method: "POST", body: d });
+    $("#editor").close();
+    toast(S.editing ? "Настройки сохранены" : "Бот создан. Запустите его, когда будете готовы.");
+    loadBots(true);
+  } catch (err) { toast(err.message, true); }
+});
+
+// ---------- бэктест ----------
+$("#runBt").onclick = async () => {
+  const btn = $("#runBt"), box = $("#btResult");
+  btn.disabled = true; btn.textContent = "Загружаю историю…";
+  box.innerHTML = "";
+  try {
+    const r = await api("/api/backtest", { method: "POST", body: { ...readForm(), candles: +$("#btCandles").value } });
+    box.innerHTML = btHtml(r);
+  } catch (err) {
+    box.innerHTML = `<p class="err">${esc(err.message)}</p>`;
+  } finally { btn.disabled = false; btn.textContent = "Проверить на истории"; }
+};
+
+function btHtml(r) {
+  const from = new Date(r.from).toLocaleDateString("ru-RU"), to = new Date(r.to).toLocaleDateString("ru-RU");
+  let lead = r.trades
+    ? `С ${from} по ${to} бот закрыл бы ${r.trades} сделок с итогом <b class="${cls(r.pnl)}">${usdt(r.pnl)}</b> (${pct(r.pnl_pct)} от максимальной суммы в сделке). Цена за это время изменилась на ${pct(r.price_change_pct)}.`
+    : `С ${from} по ${to} бот не закрыл ни одной сделки. Попробуйте другие пороги сигнала или больше истории.`;
+  if (r.open_position) lead += ` В конце периода оставалась открытая позиция: ${usdt(r.open_position.unrealized)}.`;
+  const stats = [
+    ["Сделок в плюсе", r.winrate == null ? "—" : `${r.wins} из ${r.trades} (${num(r.winrate, 0)}%)`],
+    ["Худшая просадка", usdt(-r.max_drawdown)],
+    ["Комиссии", num(r.fees, 2) + " USDT"],
+    ["Макс. в сделке", num(r.capital, 2) + " USDT"],
+    ["Средняя длительность", duration(r.avg_duration_ms)],
+    ["Усреднений максимум", String(r.max_so_used)],
+  ];
+  return `<p class="bt-lead">${lead}</p>
+    <div class="bt-stats">${stats.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join("")}</div>
+    ${equityChart(r.equity)}
+    <p class="hint">Проверка приблизительная: внутри свечи порядок движения цены неизвестен, проскальзывание и ликвидации не учтены. Хороший результат на истории не обещает прибыль в будущем.</p>
+    ${r.last_trades.length ? `<div class="table-wrap bt-trades"><table><thead><tr><th>Выход</th><th>Сторона</th><th class="num">Цена</th><th class="num">Результат</th><th>Причина</th></tr></thead><tbody>
+      ${r.last_trades.map(t => `<tr><td>${when(t.ts)}</td><td>${t.side === "long" ? "лонг" : "шорт"}</td><td class="num">${num(t.price)}</td><td class="num ${cls(t.pnl)}">${usdt(t.pnl)}</td><td>${esc(t.reason)}${t.so_used ? `, усредн. ${t.so_used}` : ""}</td></tr>`).join("")}
+    </tbody></table></div><p class="hint">Последние ${r.last_trades.length} сделок.</p>` : ""}`;
+}
+
+function equityChart(pts) {
+  if (!pts || pts.length < 2) return "";
+  const vals = pts.map(p => p.v);
+  let lo = Math.min(0, ...vals), hi = Math.max(0, ...vals);
+  if (hi === lo) hi = lo + 1;
+  const W = 1000, H = 150;
+  const X = i => (i / (pts.length - 1)) * W, Y = v => H - ((v - lo) / (hi - lo)) * H;
+  const line = pts.map((p, i) => `${X(i).toFixed(1)},${Y(p.v).toFixed(1)}`).join(" ");
+  const last = vals[vals.length - 1];
+  return `<div class="chart" aria-label="Результат по времени">
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+      <line x1="0" x2="${W}" y1="${Y(0)}" y2="${Y(0)}" stroke="var(--rule)" stroke-dasharray="4 4" vector-effect="non-scaling-stroke"/>
+      <polyline points="${line}" fill="none" stroke="var(${last >= 0 ? "--profit" : "--loss"})" stroke-width="2" vector-effect="non-scaling-stroke"/>
+    </svg>
+    <span class="ax" style="top:2px">${usdt(hi)}</span>
+    <span class="ax" style="bottom:2px">${usdt(lo)}</span>
+  </div><p class="hint">Линия — итог закрытых сделок плюс открытая позиция на каждый момент.</p>`;
+}
+
+// ---------- старт ----------
+(async function init() {
+  try { S.meta = await api("/api/meta"); }
+  catch (e) { $("#summary").textContent = "Не удалось связаться с программой бота: " + e.message; return; }
+  $("#tf").innerHTML = S.meta.timeframes.map(t => `<option>${t}</option>`).join("");
+  $("#preset").innerHTML = `<option value="">Свои настройки</option>` + S.meta.presets.map(p => `<option value="${p.id}">${esc(p.title)}</option>`).join("");
+  await loadBots(true); loadTrades();
+  setInterval(loadBots, 3000);
+  setInterval(loadTrades, 10000);
+})();
+</script>
+</body>
+</html>
