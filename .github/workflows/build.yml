@@ -1,0 +1,84 @@
+# Проверка запуска и сборка готовых файлов.
+# - каждый пуш: start.sh / start.bat запускаются с --check на Windows, macOS и Ubuntu;
+# - тег vX.Y.Z или кнопка «Run workflow»: сборка ValesBot для Windows, macOS и Linux;
+# - тег vX.Y.Z: готовые файлы выкладываются в GitHub Releases.
+name: Запуск и сборка
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write  # выкладывать файлы в Releases
+
+jobs:
+  start-scripts:
+    name: Скрипт запуска · ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: ./start.sh --check
+        if: runner.os != 'Windows'
+        run: ./start.sh --check
+      - name: start.bat --check
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: start.bat --check
+
+  build:
+    name: Сборка · ${{ matrix.name }}
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: windows-latest, name: windows, file: ValesBot.exe}
+          - {os: macos-latest, name: macos, file: ValesBot}
+          - {os: ubuntu-latest, name: linux, file: ValesBot}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt pyinstaller
+      - run: pyinstaller --noconfirm valesbot.spec
+      - name: Собранный файл запускается в пустой папке
+        shell: bash
+        run: |
+          mkdir smoke && cp "dist/${{ matrix.file }}" smoke/ && cd smoke
+          "./${{ matrix.file }}" --check
+      - name: Имя файла с системой
+        shell: bash
+        run: |
+          mkdir out
+          case "${{ matrix.name }}" in
+            windows) cp dist/ValesBot.exe out/ValesBot-windows.exe ;;
+            *) cp dist/ValesBot "out/ValesBot-${{ matrix.name }}" ;;
+          esac
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ValesBot-${{ matrix.name }}
+          path: out/*
+
+  release:
+    name: Выложить в Releases
+    needs: [start-scripts, build]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: out/*
+          generate_release_notes: true

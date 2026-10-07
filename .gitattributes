@@ -1,0 +1,4 @@
+# скрипты запуска: Unix — только LF, Windows — CRLF, иначе они ломаются на «чужой» системе
+*.sh       text eol=lf
+*.command  text eol=lf
+*.bat      text eol=crlf
