@@ -242,6 +242,7 @@ pre.logs { white-space: pre-wrap; font-size: 13px; line-height: 1.55; margin: 0;
     </div>
     <div class="top-actions">
       <button class="btn" id="tgBtn">Telegram</button>
+      <button class="btn" id="tunedBots" title="Бумажные боты с настройками, подобранными по истории BTC/USDT за год">Лучшие боты</button>
       <button class="btn primary" id="newBot">Новый бот</button>
     </div>
   </div>
@@ -578,7 +579,8 @@ function renderBots() {
   if (!bots.length) {
     $("#bots").innerHTML = `<div class="empty"><h2>Создайте первого бота</h2>
       <p>Начните с бумажной торговли: бот будет следить за настоящими ценами Binance, но сделки останутся понарошку. Перед запуском проверьте стратегию на истории.</p>
-      <button class="btn primary" data-act="new">Новый бот</button></div>`;
+      <button class="btn primary" data-act="new">Новый бот</button>
+      <button class="btn" data-act="tuned">Создать лучших ботов</button></div>`;
     return;
   }
   $("#bots").innerHTML = bots.map(botHtml).join("");
@@ -694,6 +696,7 @@ $("#bots").addEventListener("click", async e => {
   const id = +btn.dataset.id, act = btn.dataset.act, bot = S.bots.find(b => b.id === id);
   try {
     if (act === "new") return openEditor(null);
+    if (act === "tuned") return createTunedBots(btn);
     if (act === "edit") return openEditor(bot);
     if (act === "logs") return openLogs(bot);
     if (act === "chart") return openChart(bot);
@@ -719,6 +722,22 @@ $("#bots").addEventListener("click", async e => {
   } catch (err) { toast(err.message, true); btn.disabled = false; }
 });
 $("#newBot").onclick = () => openEditor(null);
+$("#tunedBots").onclick = e => createTunedBots(e.currentTarget);
+
+async function createTunedBots(btn) {
+  if (!confirm("Создать бумажных ботов BTC/USDT с настройками, которые лучше всего показали себя " +
+               "на истории за год (октябрь 2025 — октябрь 2026)? Боты появятся остановленными, " +
+               "результат на истории — в «Проверить на истории». Уже созданные не повторятся.")) return;
+  btn.disabled = true;
+  try {
+    const r = await api("/api/bots/tuned", { method: "POST" });
+    toast(r.created.length
+      ? `Создано ботов: ${r.created.length}. Запустите их, когда будете готовы.`
+      : "Эти боты уже есть в списке");
+    await loadBots(true);
+  } catch (err) { toast(err.message, true); }
+  btn.disabled = false;
+}
 $("#tgBtn").onclick = () => {
   const t = S.meta.telegram;
   $("#tgStatus").innerHTML = t.enabled

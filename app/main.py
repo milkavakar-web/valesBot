@@ -17,8 +17,8 @@ from .backtest import MAX_CANDLES, chart_data, fetch_history, run_backtest
 from .brokers import exchange_symbol, hub
 from .engine import manager
 from .notify import notifier
-from .strategy import (DEFAULT_PARAMS, PRESETS, TF_MS, TIMEFRAMES, max_margin, normalize_bot,
-                       prepare, warmup_candles)
+from .strategy import (DEFAULT_PARAMS, PRESETS, TF_MS, TIMEFRAMES, TUNED_BOTS, max_margin,
+                       normalize_bot, prepare, warmup_candles)
 from .trader import Trader
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
@@ -169,6 +169,20 @@ async def create_bot(data: Dict[str, Any]):
     bot = normalize_bot(data)
     bot_id = db.create_bot(bot)
     return _view(db.get_bot(bot_id))
+
+
+@app.post("/api/bots/tuned")
+async def create_tuned_bots():
+    """Бумажные боты с настройками, подобранными по истории (strategy.TUNED_BOTS).
+    Бот с таким же именем уже есть — пропускаем, чтобы повторное нажатие не плодило копии."""
+    have = {b["name"] for b in db.list_bots()}
+    created = []
+    for t in TUNED_BOTS:
+        if t["name"] in have:
+            continue
+        bot_id = db.create_bot(normalize_bot({**t, "mode": "paper"}))
+        created.append(_view(db.get_bot(bot_id)))
+    return {"created": created, "skipped": len(TUNED_BOTS) - len(created)}
 
 
 @app.put("/api/bots/{bot_id}")

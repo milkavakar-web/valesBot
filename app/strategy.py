@@ -135,6 +135,53 @@ PRESETS = [
     },
 ]
 
+# Готовые боты с настройками, подобранными перебором ~1500 комбинаций условий на истории
+# BTC/USDT (спот, свечи 15m/1h/4h, октябрь 2025 — октябрь 2026). За этот год BTC упал на 33%.
+# В about — результат на истории: прибыль от суммы ордера вместе с позицией, открытой
+# на конец периода, и наибольшая просадка. На другом рынке результат будет другим.
+_STOCH_K, _STOCH_D = _i("stoch", "k"), _i("stoch", "d")
+_EMA200 = _i("ema", period=200)
+
+TUNED_BOTS = [
+    {
+        "name": "Подобран: стохастик 4h + EMA200", "symbol": "BTC/USDT", "timeframe": "4h", "market": "spot",
+        "about": "Год +18,9%, полгода +19,1%, месяц +0,5%; просадка 3%, 11 сделок за год.",
+        "params": {**_NO_DCA, "direction": "long", "take_profit_pct": 0, "stop_loss_pct": 3,
+                   "rules": _sets(long=[_c(_STOCH_K, "cross_up", _STOCH_D), _c(_STOCH_K, "below", 20),
+                                        _c(PRICE, "above", _EMA200)],
+                                  exit_long=[_c(_STOCH_K, "above", 80)])},
+    },
+    {
+        "name": "Подобран: стохастик 4h", "symbol": "BTC/USDT", "timeframe": "4h", "market": "spot",
+        "about": "Год +30,4%, полгода +7,6%, месяц +0,5%; просадка 17%, 49 сделок за год.",
+        "params": {**_NO_DCA, "direction": "long", "take_profit_pct": 0, "stop_loss_pct": 3,
+                   "rules": _sets(long=[_c(_STOCH_K, "cross_up", _STOCH_D), _c(_STOCH_K, "below", 20)],
+                                  exit_long=[_c(_STOCH_K, "above", 80)])},
+    },
+    {
+        "name": "Подобран: EMA 20/50 4h + EMA200", "symbol": "BTC/USDT", "timeframe": "4h", "market": "spot",
+        "about": "Год +23,0%, полгода +18,6%, месяц +2,7%; просадка 11%, 9 сделок за год.",
+        "params": {**_NO_DCA, "direction": "long", "take_profit_pct": 0, "stop_loss_pct": 5,
+                   "rules": _sets(long=[_c(_i("ema", period=20), "cross_up", _i("ema", period=50)),
+                                        _c(PRICE, "above", _EMA200)],
+                                  exit_long=[_c(_i("ema", period=20), "cross_down", _i("ema", period=50))])},
+    },
+    {
+        "name": "Подобран: Боллинджер 1h + EMA200", "symbol": "BTC/USDT", "timeframe": "1h", "market": "spot",
+        "about": "Год +15,3%, полгода +17,9%, месяц +4,1%; просадка 11%, 20 сделок за год.",
+        "params": {**_NO_DCA, "direction": "long", "take_profit_pct": 0, "stop_loss_pct": 0,
+                   "rules": _sets(long=[_c(PRICE, "cross_up", _i("bb", "lower", mult=2.5)),
+                                        _c(PRICE, "above", _EMA200)],
+                                  exit_long=[_c(PRICE, "cross_up", _i("bb", "upper", mult=2.5))])},
+    },
+    {
+        "name": "Подобран: RSI 15m + EMA200", "symbol": "BTC/USDT", "timeframe": "15m", "market": "spot",
+        "about": "Год +16,0%, полгода +11,0%, месяц +4,0%; просадка 6%, 16 сделок за год.",
+        "params": {**_NO_DCA, "direction": "long", "take_profit_pct": 1.2, "stop_loss_pct": 0,
+                   "rules": _sets(long=[_c(RSI14, "below", 30), _c(PRICE, "above", _EMA200)])},
+    },
+]
+
 SYMBOL_RE = re.compile(r"^[A-Z0-9]{2,15}/[A-Z0-9]{2,10}$")
 
 
