@@ -56,7 +56,18 @@ def say(text: str) -> None:
     print(text, flush=True)
 
 
+def utf8_output() -> None:
+    """Windows: если вывод идёт не в окно консоли, а в файл или канал, Python пишет в
+    кодировке системы (cp1252), и первая же русская строка роняет программу."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
 def main(argv=None) -> int:
+    utf8_output()
     args = set(argv if argv is not None else sys.argv[1:])
     check = "--check" in args
     os.chdir(base_dir())
