@@ -71,6 +71,7 @@ button, input, select { font: inherit; color: inherit; }
 .link:hover { color: var(--ink); text-decoration-color: currentColor; }
 .link.danger:hover { color: var(--loss); }
 
+.top-actions { display: flex; gap: 10px; }
 .top { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 8px; }
 .summary { color: var(--muted); margin: 6px 0 0; }
 .summary b { color: var(--ink); font-weight: 600; }
@@ -216,6 +217,9 @@ table.mini td { padding: 4px 18px 4px 0; border: 0; }
 .trades-bt td { vertical-align: top; }
 .trades-bt td.wrap { white-space: normal; min-width: 170px; }
 
+.tg-list { margin: 8px 0 0; padding-left: 20px; }
+.tg-list li { margin: 4px 0; }
+code { font-size: 13px; background: var(--paper); padding: 1px 5px; border-radius: 4px; }
 pre.logs { white-space: pre-wrap; font-size: 13px; line-height: 1.55; margin: 0; }
 .toast { position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--ink); color: var(--paper); padding: 10px 16px; border-radius: 9px; max-width: min(560px, 92vw); z-index: 10; display: none; }
 .toast.show { display: block; }
@@ -236,7 +240,10 @@ pre.logs { white-space: pre-wrap; font-size: 13px; line-height: 1.55; margin: 0;
       <h1>Боты Binance</h1>
       <p class="summary" id="summary">Загрузка…</p>
     </div>
-    <button class="btn primary" id="newBot">Новый бот</button>
+    <div class="top-actions">
+      <button class="btn" id="tgBtn">Telegram</button>
+      <button class="btn primary" id="newBot">Новый бот</button>
+    </div>
   </div>
   <div id="banner"></div>
   <div class="bots" id="bots"></div>
@@ -339,6 +346,8 @@ pre.logs { white-space: pre-wrap; font-size: 13px; line-height: 1.55; margin: 0;
           <label class="f">Стоп-лосс, %<input type="number" name="stop_loss_pct" min="0" step="any"></label>
         </div>
         <p class="hint">Тейк и стоп считаются от средней цены входа, 0 — выключено. Позиция закрывается по тому, что сработает первым: тейк, стоп или условия выхода.</p>
+        <label class="check" id="exStopField"><input type="checkbox" name="exchange_stop">Ставить стоп-лосс ордером на бирже</label>
+        <p class="hint" id="exStopHint"></p>
         <div id="exitSets"></div>
         <label class="check" id="flipField"><input type="checkbox" name="exit_on_opposite">Разворачиваться: при сигнале в другую сторону закрыть позицию и открыть обратную</label>
         <p class="hint warn" id="exitWarn"></p>
@@ -393,6 +402,31 @@ pre.logs { white-space: pre-wrap; font-size: 13px; line-height: 1.55; margin: 0;
     <div class="drawer-body">
       <div class="chart-box" id="liveChart"></div>
       <div class="chart-keys" id="liveKeys"></div>
+    </div>
+  </div>
+</dialog>
+
+<dialog class="drawer" id="tgDialog" aria-labelledby="tgTitle">
+  <div class="drawer-inner">
+    <div class="drawer-head"><h2 id="tgTitle">Уведомления в Telegram</h2><button type="button" class="link" data-close>Закрыть</button></div>
+    <div class="drawer-body">
+      <p id="tgStatus" style="margin-top:14px"></p>
+      <h3 style="margin-top:22px">Что приходит</h3>
+      <ul class="tg-list">
+        <li>вход, усреднение и выход — с ценой, причиной и результатом;</li>
+        <li>тревоги: стоп не удалось поставить на бирже, биржа не подтвердила ордер, ошибка держится дольше одной проверки;</li>
+        <li>запуск и остановка ботов и программы — без звука.</li>
+      </ul>
+      <h3 style="margin-top:22px">Как подключить</h3>
+      <ol class="tg-list">
+        <li>В Telegram откройте <b>@BotFather</b>, отправьте <code>/newbot</code> и получите токен вида <code>123456:ABC…</code>.</li>
+        <li>Впишите его в файл <code>.env</code>: <code>TELEGRAM_BOT_TOKEN=…</code> и перезапустите программу.</li>
+        <li>Найдите своего бота в Telegram и отправьте ему любое сообщение.</li>
+        <li>Нажмите «Проверить» — здесь появится ваш chat_id. Впишите его в <code>.env</code>: <code>TELEGRAM_CHAT_ID=…</code> и снова перезапустите программу.</li>
+      </ol>
+      <p class="hint">Токен храните только в <code>.env</code>: в панель и в базу он не попадает. <code>TELEGRAM_PAPER=0</code> в <code>.env</code> отключит сообщения о бумажных ботах.</p>
+      <button type="button" class="btn primary" id="tgTest" style="margin-top:16px">Проверить</button>
+      <div id="tgResult" style="margin-top:14px"></div>
     </div>
   </div>
 </dialog>
@@ -550,6 +584,14 @@ function renderBots() {
   $("#bots").innerHTML = bots.map(botHtml).join("");
 }
 
+function stopFact(b) {  // где сейчас живёт стоп-лосс позиции
+  const pos = b.state.position, p = b.params;
+  if (!(p.stop_loss_pct > 0) || !b.levels?.sl) return "";
+  if (pos.stop?.id) return `<div class="fact"><span>Стоп на бирже</span><b>${num(pos.stop.price)}</b></div>`;
+  if (b.mode === "paper" || p.exchange_stop === false) return `<div class="fact"><span>Стоп в программе</span><b>${num(b.levels.sl)}</b></div>`;
+  return `<div class="fact"><span>Стоп на бирже</span><b class="neg">${pos.stop ? "проверяю…" : "не стоит"}</b></div>`;
+}
+
 function botHtml(b) {
   const st = b.state, pos = st.position, p = b.params;
   const stats = st.stats || { closed: 0, wins: 0, pnl: 0 };
@@ -564,6 +606,7 @@ function botHtml(b) {
       <div class="fact"><span>Сейчас</span><b class="${cls(b.unrealized)}">${usdt(b.unrealized)} (${pct(pnlPct)})</b></div>
       ${p.safety_orders ? `<div class="fact"><span>Усреднения</span><b>${pos.so_filled} из ${p.safety_orders}</b></div>` : ""}
       <div class="fact"><span>В сделке</span><b>${num(pos.margin, 2)} из ${num(b.max_margin, 2)} USDT</b></div>
+      ${stopFact(b)}
     </div>`;
   } else {
     const ind = indicatorText(b);
@@ -604,6 +647,7 @@ function botHtml(b) {
     <div class="name">${esc(b.name)}</div>
     <p class="recipe">${esc(recipe(b))}</p>
     ${st.error && b.running ? `<p class="err">Ошибка: ${esc(st.error)}</p>` : ""}
+    ${pos?.stop_error ? `<p class="hint warn">Стоп на бирже не поставлен: ${esc(pos.stop_error)}. Пока бот запущен, стоп работает внутри программы.</p>` : ""}
     ${st.pending ? `<p class="hint warn">Ордер «${esc(st.pending.reason)}» ушёл на биржу, но ответ не пришёл. Бот найдёт его по ID при следующей проверке и до этого не торгует.</p>` : ""}
     ${body}
     ${result}
@@ -675,6 +719,26 @@ $("#bots").addEventListener("click", async e => {
   } catch (err) { toast(err.message, true); btn.disabled = false; }
 });
 $("#newBot").onclick = () => openEditor(null);
+$("#tgBtn").onclick = () => {
+  const t = S.meta.telegram;
+  $("#tgStatus").innerHTML = t.enabled
+    ? `<b class="pos">Включены.</b> Сообщения приходят в чат <code>${esc(t.chat || "")}</code>${t.paper ? ", в том числе о бумажных ботах" : ", кроме бумажных ботов"}.`
+    : t.has_token ? "<b>Почти готово:</b> токен есть, не хватает TELEGRAM_CHAT_ID — нажмите «Проверить»." : "<b>Выключены.</b> Подключение — четыре шага ниже.";
+  $("#tgResult").innerHTML = "";
+  $("#tgDialog").showModal();
+};
+$("#tgTest").onclick = async () => {
+  const btn = $("#tgTest"), box = $("#tgResult");
+  btn.disabled = true; box.innerHTML = `<p class="hint">Связываюсь с Telegram…</p>`;
+  try {
+    const r = await api("/api/telegram/test", { method: "POST" });
+    if (r.ok) box.innerHTML = `<p class="pos">Сообщение отправлено${r.bot ? ` от @${esc(r.bot)}` : ""} — проверьте Telegram.</p>`;
+    else box.innerHTML = `<p class="err">${esc(r.detail)}</p>` + (r.chats?.length
+      ? `<p>Нашёл чаты, которые писали боту${r.bot ? ` @${esc(r.bot)}` : ""}:</p><ul class="tg-list">${r.chats.map(c => `<li><code>TELEGRAM_CHAT_ID=${esc(c.id)}</code> ${esc(c.name)}</li>`).join("")}</ul>`
+      : "");
+  } catch (err) { box.innerHTML = `<p class="err">${esc(err.message)}</p>`; }
+  finally { btn.disabled = false; }
+};
 $("#tradeFilter").onchange = e => { S.tradeFilter = e.target.value; loadTrades(); };
 $$("[data-close]").forEach(b => b.onclick = () => b.closest("dialog").close());
 
@@ -786,6 +850,7 @@ function fillForm(bot) {
   setRadio("signal", p.signal === "none" ? "none" : "rules");
   PARAM_FIELDS.forEach(k => E[k].value = p[k]);
   E.exit_on_opposite.checked = !!p.exit_on_opposite;
+  E.exchange_stop.checked = p.exchange_stop !== false;
   renderSets(p.rules);
 }
 function applyPreset(id) {
@@ -809,6 +874,7 @@ function readForm() {
   params.rules = readRules();
   params.direction = getRadio("direction");
   params.exit_on_opposite = E.exit_on_opposite.checked;
+  params.exchange_stop = E.exchange_stop.checked;
   return { name: E.bot_name.value.trim(), symbol: E.symbol.value.trim(), timeframe: E.timeframe.value,
            market: getRadio("market"), mode: getRadio("mode"), params };
 }
@@ -830,6 +896,12 @@ function syncForm() {
   });
   $("#rulesHint").hidden = p.signal === "none";
   $("#flipField").hidden = dir !== "both";
+  $("#exStopField").hidden = $("#exStopHint").hidden = !(p.stop_loss_pct > 0);
+  $("#exStopHint").textContent = d.mode === "paper"
+    ? "В бумажной торговле стоп работает внутри программы. На демо-счёте и реальных деньгах он будет стоять ордером на Binance и сработает, даже если программа выключена."
+    : E.exchange_stop.checked
+      ? `Стоп встанет ордером на Binance сразу после входа и переставится после каждого усреднения. ${fut ? "Срабатывает по маркировочной цене и только закрывает позицию." : "На споте это стоп-лимит: продаёт не дешевле цены стопа минус 1%."}`
+      : "Стоп будет только внутри программы: если она выключится, позиция останется без защиты.";
   $$("[data-so]").forEach(el => el.hidden = !(p.safety_orders > 0));
 
   // подсказка про объём сделки

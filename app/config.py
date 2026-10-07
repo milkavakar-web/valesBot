@@ -36,6 +36,12 @@ BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET", "")
 BINANCE_DEMO_API_KEY = os.getenv("BINANCE_DEMO_API_KEY", "")
 BINANCE_DEMO_API_SECRET = os.getenv("BINANCE_DEMO_API_SECRET", "")
 
+# Уведомления в Telegram: токен бота от @BotFather и chat_id (см. README).
+# Без них уведомления выключены. TELEGRAM_PAPER=0 — не писать о бумажных ботах.
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+TELEGRAM_PAPER = os.getenv("TELEGRAM_PAPER", "1").strip().lower() in ("1", "true", "yes", "on")
+
 # Комиссии для бумажной торговли и бэктеста (тейкер, доля)
 PAPER_FEE_SPOT = float(os.getenv("PAPER_FEE_SPOT", "0.001"))
 PAPER_FEE_FUTURES = float(os.getenv("PAPER_FEE_FUTURES", "0.0005"))

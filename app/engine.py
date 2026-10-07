@@ -8,8 +8,9 @@ from typing import Any, Deque, Dict, Optional, Tuple
 
 from . import config, db
 from .brokers import ExchangeBroker, PaperBroker, exchange_symbol, hub
+from .notify import alert_message, info_message, notifier, trade_message, wanted
 from .strategy import prepare, warmup_candles
-from .trader import Trader
+from .trader import OrderStatusUnknown, Trader
 
 logger = logging.getLogger("bot.engine")
 
@@ -24,6 +25,8 @@ class Manager:
         self.traders: Dict[int, Tuple[Trader, Any]] = {}
         self.logs: Dict[int, Deque[str]] = {}
         self.locks: Dict[int, asyncio.Lock] = {}
+        self.err_count: Dict[int, int] = {}      # ошибок подряд у бота
+        self.err_notified: Dict[int, str] = {}   # о какой ошибке уже написали в Telegram
 
     # ---------- служебное ----------
 
@@ -31,6 +34,14 @@ class Manager:
         line = time.strftime("%d.%m %H:%M:%S") + "  " + msg
         self.logs.setdefault(bot_id, deque(maxlen=300)).append(line)
         logger.info("[бот %s] %s", bot_id, msg)
+
+    def notify(self, bot: Dict[str, Any], text: str, silent: bool = False) -> None:
+        if wanted(bot):
+            notifier.send(text, silent)
+
+    def alert(self, bot: Dict[str, Any], msg: str) -> None:
+        self.log(bot["id"], "⚠ " + msg)
+        self.notify(bot, alert_message(bot, msg))
 
     def lock(self, bot_id: int) -> asyncio.Lock:
         return self.locks.setdefault(bot_id, asyncio.Lock())
@@ -60,9 +71,11 @@ class Manager:
         async def record(t: Dict[str, Any]) -> None:
             db.add_trade(bot_id, t)
             db.save_state(bot_id, state)
+            self.notify(bot, *trade_message(bot, t))
 
         trader = Trader(bot, broker, state, record, lambda m: self.log(bot_id, m),
-                        persist=lambda: db.save_state(bot_id, state))
+                        persist=lambda: db.save_state(bot_id, state),
+                        alert=lambda m: self.alert(bot, m))
         return trader, ex
 
     # ---------- запуск и остановка ----------
@@ -98,6 +111,7 @@ class Manager:
         built = await self.build(bot)  # ошибки (нет ключей и т.п.) сразу уходят в интерфейс
         db.set_enabled(bot_id, True)
         self.tasks[bot_id] = asyncio.create_task(self._run(bot_id, built))
+        self.notify(bot, info_message(bot, "▶ Бот запущен"), silent=True)
 
     async def stop(self, bot_id: int) -> None:
         db.set_enabled(bot_id, False)
@@ -105,6 +119,12 @@ class Manager:
         if t and not t.done():
             await self._cancel(bot_id, t)
             self.log(bot_id, "Бот остановлен")
+            bot = db.get_bot(bot_id)
+            if bot:
+                pos = bot["state"].get("position")
+                tail = (" Позиция остаётся, стоп на бирже стоит." if pos and pos.get("stop")
+                        else " Позиция остаётся без присмотра." if pos else "")
+                self.notify(bot, info_message(bot, "⏸ Бот остановлен." + tail), silent=not pos)
         self.tasks.pop(bot_id, None)
         self.traders.pop(bot_id, None)
 
@@ -142,6 +162,14 @@ class Manager:
             state = bot["state"] if bot else {}
         state["error"] = msg
         db.save_state(bot_id, state)
+        # В Telegram — только ошибки, которые держатся: случайный сбой сети исправится сам на
+        # следующем шаге. Неподтверждённый ордер — сразу.
+        n = self.err_count[bot_id] = self.err_count.get(bot_id, 0) + 1
+        if isinstance(e, OrderStatusUnknown) or (n >= 2 and self.err_notified.get(bot_id) != msg):
+            bot = db.get_bot(bot_id)
+            if bot:
+                self.notify(bot, alert_message(bot, "Ошибка: " + msg))
+                self.err_notified[bot_id] = msg
 
     async def _tick(self, trader: Trader, ex) -> None:
         bot, state = trader.bot, trader.state
@@ -152,8 +180,6 @@ class Manager:
         ohlcv = await ex.fetch_ohlcv(sym, bot["timeframe"], limit=limit)
         if len(ohlcv) < 3:
             raise RuntimeError("Биржа вернула слишком мало свечей")
-        # сначала разбираемся с ордером, ответ на который не дошёл
-        await trader.resolve_pending()
         now = now_ms()
         # последняя свеча обычно ещё формируется — сигнал считаем только по закрытым
         closed = ohlcv if ohlcv[-1][0] + tf_ms <= now else ohlcv[:-1]
@@ -161,6 +187,9 @@ class Manager:
         state["last_price"] = price
         state["last_tick"] = now
 
+        # сначала разбираемся с ордером, ответ на который не дошёл, и со стопом на бирже
+        await trader.resolve_pending()
+        await trader.check_stop(price, now)
         await trader.on_price(price, now)
 
         last_ts = closed[-1][0]
@@ -169,6 +198,12 @@ class Manager:
             ind = prepare(closed, trader.p)
             await trader.on_candle(ind, len(closed) - 1, price, now)
 
+        # после входа или усреднения ставим или переставляем стоп на бирже
+        await trader.sync_stop(price, now)
+
+        if self.err_notified.pop(bot["id"], None):
+            self.notify(bot, info_message(bot, "✅ Снова работает после ошибки"), silent=True)
+        self.err_count.pop(bot["id"], None)
         state["error"] = None
         db.save_state(bot["id"], state)
 
@@ -185,12 +220,14 @@ class Manager:
     async def close_position(self, bot_id: int) -> None:
         async with self.lock(bot_id):
             trader, ex = await self._trader_for(bot_id)
-            await trader.resolve_pending()
-            if not trader.pos:
-                raise ValueError("Открытой позиции нет")
             bot = trader.bot
             ticker = await ex.fetch_ticker(exchange_symbol(bot["market"], bot["symbol"]))
-            await trader.close(float(ticker["last"]), "вручную", now_ms())
+            price = float(ticker["last"])
+            await trader.resolve_pending()
+            await trader.check_stop(price, now_ms())  # стоп мог сработать, пока бот стоял
+            if not trader.pos:
+                raise ValueError("Открытой позиции нет")
+            await trader.close(price, "вручную", now_ms())
             db.save_state(bot_id, trader.state)
 
     async def forget_position(self, bot_id: int) -> None:
@@ -198,9 +235,21 @@ class Manager:
         (если разобрались с ними сами на бирже)."""
         async with self.lock(bot_id):
             if self.is_running(bot_id) and bot_id in self.traders:
-                state = self.traders[bot_id][0].state
+                trader = self.traders[bot_id][0]
             else:
-                state = db.get_bot(bot_id)["state"]
+                bot = db.get_bot(bot_id)
+                st = (bot["state"].get("position") or {}).get("stop")
+                trader = (await self.build(bot))[0] if st else None
+                state = bot["state"]
+            if trader:
+                state = trader.state
+                st = (state.get("position") or {}).get("stop")
+                if st:  # стоп на бирже без позиции однажды закрыл бы чужую позицию — снимаем
+                    try:
+                        await trader.broker.cancel_stop(st)
+                        self.log(bot_id, "Стоп на бирже снят")
+                    except Exception as e:
+                        self.alert(trader.bot, f"Не удалось снять стоп на бирже ({e}). Снимите его вручную на Binance.")
             state["position"] = None
             state["pending"] = None
             state["dust"] = None

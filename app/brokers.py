@@ -6,13 +6,17 @@ from typing import Dict, Optional, Tuple
 import ccxt.async_support as ccxt
 
 from . import config
-from .trader import Fill, OrderStatusUnknown
+from .trader import Fill, OrderStatusUnknown, StopRejected
 
 log = logging.getLogger("bot.broker")
 
 # После этих ошибок ясно, что биржа ордер не приняла. Любая другая ошибка
 # (таймаут, обрыв, сбой на стороне биржи) значит «неизвестно, прошёл ли ордер».
 REJECTED = (ccxt.InsufficientFunds, ccxt.InvalidOrder, ccxt.BadRequest, ccxt.AuthenticationError)
+
+# Спот: стоп-лимит продаёт не дешевле цены срабатывания минус 1%. Совсем без лимита стоп
+# на споте Binance не поставить, а слишком близкий лимит при резком падении может не исполниться.
+STOP_LIMIT_GAP = 0.01
 
 
 def exchange_symbol(market: str, symbol: str) -> str:
@@ -85,6 +89,8 @@ hub = ExchangeHub()
 class PaperBroker:
     """Симуляция: сделки «исполняются» по переданной цене, с комиссией тейкера."""
 
+    exchange_stops = False  # стоп работает внутри программы
+
     def __init__(self, market: str):
         self.fee_rate = config.PAPER_FEE_SPOT if market == "spot" else config.PAPER_FEE_FUTURES
 
@@ -101,6 +107,8 @@ class PaperBroker:
 
 class ExchangeBroker:
     """Рыночные ордера на Binance. Позиции на фьючерсах — изолированная маржа, one-way режим."""
+
+    exchange_stops = True
 
     def __init__(self, ex: ccxt.binance, market: str, symbol: str, leverage: int):
         self.ex = ex
@@ -209,3 +217,93 @@ class ExchangeBroker:
         # Объём продажи округляется вниз до шага лота, и часть монет остаётся на счёте.
         fill.unsold = max(have - fill.amount, 0.0)
         return fill
+
+    # ---------- защитный стоп на бирже ----------
+
+    def _trig(self) -> dict:
+        # стопы на фьючерсах USDⓈ-M — «алгоордера» Binance со своими методами поиска и отмены
+        return {"trigger": True} if self.market == "futures" else {}
+
+    async def place_stop(self, side: str, qty: float, level: float, cid: str) -> dict:
+        """Стоп на весь объём позиции. Фьючерсы — STOP_MARKET reduceOnly по маркировочной цене
+        (не сработает от случайного прокола и не откроет обратную позицию); спот — STOP_LOSS_LIMIT."""
+        order_side = "sell" if side == "long" else "buy"
+        try:
+            stop = float(self.ex.price_to_precision(self.symbol, level))
+            if self.market == "futures":
+                kind, price = "STOP_MARKET", None
+                amount = self._amount(qty, stop, reduce_only=True)
+                params = {"stopPrice": stop, "reduceOnly": True, "workingType": "MARK_PRICE"}
+            else:
+                kind = "STOP_LOSS_LIMIT"
+                price = float(self.ex.price_to_precision(self.symbol, stop * (1 - STOP_LIMIT_GAP)))
+                amount = self._amount(qty, price)
+                params = {"stopPrice": stop, "timeInForce": "GTC"}
+        except ValueError as e:
+            raise StopRejected(str(e)) from e
+        try:
+            o = await self.ex.create_order(self.symbol, kind, order_side, amount, price,
+                                           {**params, "clientOrderId": cid})
+        except REJECTED as e:
+            immediate = isinstance(e, ccxt.OrderImmediatelyFillable) or "immediately" in str(e).lower()
+            raise StopRejected(f"биржа отказала ({e})", immediate=immediate) from e
+        except Exception as e:
+            raise OrderStatusUnknown(f"Биржа не подтвердила стоп ({e})") from e
+        return {"id": o.get("id"), "cid": cid, "price": stop, "qty": amount}
+
+    async def _stop_fill(self, o: dict) -> Fill:
+        """Исполнение стопа с настоящей комиссией: в ответе о стоп-ордере её нет, она есть в сделках."""
+        try:
+            # fetch_order_trades в ccxt есть только для спота; сделки по номеру ордера работают везде
+            trades = await self.ex.fetch_my_trades(self.symbol, params={"orderId": o["id"]})
+            if trades:
+                o = {**o, "fee": None, "fees": [t["fee"] for t in trades if t.get("fee")]}
+        except Exception as e:
+            log.warning("Сделки ордера %s: %s", o.get("id"), e)
+        return await self._fill(o, float(o.get("filled") or 0),
+                                float(o.get("average") or o.get("price") or 0), is_spot_buy=False)
+
+    async def check_stop(self, stop: dict, price: float):
+        """Состояние стопа: ("open", None) — стоит; ("pending", None) — сработал, исполняется;
+        ("filled", Fill) — исполнен; ("gone", Fill|None) — снят или истёк (Fill — проданная часть);
+        ("stuck", None) — стоп-лимит продал часть, а цена ушла ниже лимита."""
+        trig = self._trig()
+        try:
+            if stop.get("id"):
+                o = await self.ex.fetch_order(stop["id"], self.symbol, trig)
+            else:  # ответ на постановку не дошёл — ищем по нашему ID
+                o = await self.ex.fetch_order(None, self.symbol, {**trig, "clientOrderId": stop["cid"]})
+                stop["id"] = o.get("id")
+        except ccxt.OrderNotFound:
+            return "gone", None
+        status, filled = o.get("status"), float(o.get("filled") or 0)
+        if self.market == "futures":
+            if status == "open":
+                return "open", None
+            if status != "closed":
+                return "gone", None
+            actual = (o.get("info") or {}).get("actualOrderId")
+            if not actual:
+                return "pending", None
+            a = await self.ex.fetch_order(str(actual), self.symbol)
+            if a.get("status") == "closed" or a.get("filled"):
+                return "filled", await self._stop_fill(a)
+            return ("gone", None) if a.get("status") in ("canceled", "expired", "rejected") else ("pending", None)
+        if status == "closed":
+            return "filled", await self._stop_fill(o)
+        if status == "open":
+            limit = float(o.get("price") or 0)
+            return ("stuck", None) if filled and limit and price < limit else ("open", None)
+        return "gone", (await self._stop_fill(o) if filled else None)
+
+    async def cancel_stop(self, stop: dict) -> Optional[Fill]:
+        """Снимает стоп. Возвращает часть, которую стоп-лимит успел продать, или None.
+        Если ордера уже нет (сработал или снят), биржа ответит ошибкой."""
+        trig = self._trig()
+        if stop.get("id"):
+            o = await self.ex.cancel_order(stop["id"], self.symbol, trig)
+        else:
+            o = await self.ex.cancel_order(None, self.symbol, {**trig, "clientOrderId": stop["cid"]})
+        if self.market == "spot" and float(o.get("filled") or 0) > 0:
+            return await self._stop_fill(o)
+        return None

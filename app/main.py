@@ -16,6 +16,7 @@ from . import config, db, rules
 from .backtest import MAX_CANDLES, chart_data, fetch_history, run_backtest
 from .brokers import exchange_symbol, hub
 from .engine import manager
+from .notify import notifier
 from .strategy import (DEFAULT_PARAMS, PRESETS, TF_MS, TIMEFRAMES, max_margin, normalize_bot,
                        prepare, warmup_candles)
 from .trader import Trader
@@ -38,9 +39,14 @@ def auth(creds: Optional[HTTPBasicCredentials] = Depends(security)) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init()
+    await notifier.start()
     await manager.startup()
+    running = sum(manager.is_running(b["id"]) for b in db.list_bots())
+    notifier.send(f"Программа бота запущена, работают ботов: {running}", silent=True)
     yield
     await manager.shutdown()
+    notifier.send("Программа бота остановлена. Стопы на бирже остаются на месте.", silent=True)
+    await notifier.stop()
     await hub.close_all()
 
 
@@ -145,6 +151,9 @@ async def meta():
         "has_live_keys": bool(config.BINANCE_API_KEY and config.BINANCE_API_SECRET),
         "has_demo_keys": bool(config.BINANCE_DEMO_API_KEY and config.BINANCE_DEMO_API_SECRET),
         "poll_seconds": config.POLL_SECONDS,
+        "telegram": {"enabled": notifier.enabled, "has_token": bool(config.TELEGRAM_BOT_TOKEN),
+                     "has_chat": bool(config.TELEGRAM_CHAT_ID), "chat": config.TELEGRAM_CHAT_ID,
+                     "paper": config.TELEGRAM_PAPER},
     }
 
 
@@ -227,6 +236,12 @@ async def logs(bot_id: int):
 @app.get("/api/trades")
 async def trades(bot_id: Optional[int] = None, limit: int = 200):
     return db.list_trades(bot_id, min(max(limit, 1), 1000))
+
+
+@app.post("/api/telegram/test")
+async def telegram_test():
+    """Пробное сообщение в Telegram; без chat_id — подсказка, какой chat_id вписать."""
+    return await notifier.test()
 
 
 # ---------- проверка на истории и графики ----------

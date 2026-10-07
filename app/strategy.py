@@ -41,6 +41,7 @@ DEFAULT_PARAMS: Dict[str, Any] = {
     "leverage": 1,            # только фьючерсы
     "take_profit_pct": 1.5,   # от средней цены, 0 = выключен
     "stop_loss_pct": 0.0,     # от средней цены, 0 = выключен
+    "exchange_stop": True,    # демо и реальные деньги: дублировать стоп-лосс ордером на бирже
     "safety_orders": 0,       # число усреднений
     "so_step_pct": 2.0,       # шаг первого усреднения, %
     "so_step_scale": 1.0,     # во сколько раз растёт каждый следующий шаг
@@ -212,6 +213,7 @@ def normalize_bot(data: Dict[str, Any]) -> Dict[str, Any]:
     p["leverage"] = _num(src, "leverage", 1, 20, True) if market == "futures" else 1
     p["take_profit_pct"] = _num(src, "take_profit_pct", 0, 100)
     p["stop_loss_pct"] = _num(src, "stop_loss_pct", 0, 95)
+    p["exchange_stop"] = bool(src.get("exchange_stop", True))
     p["safety_orders"] = _num(src, "safety_orders", 0, 15, True)
     p["so_step_pct"] = _num(src, "so_step_pct", 0.1, 50)
     p["so_step_scale"] = _num(src, "so_step_scale", 0.5, 3)

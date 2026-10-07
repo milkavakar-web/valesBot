@@ -3,6 +3,7 @@
 Один и тот же класс работает и в живом боте, и в бэктесте — поэтому
 результаты проверки на истории соответствуют тому, что бот делает вживую.
 """
+import math
 import secrets
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, Optional
@@ -23,11 +24,30 @@ class OrderStatusUnknown(RuntimeError):
     """Ордер ушёл на биржу, но ответа нет (таймаут, обрыв связи): он мог исполниться."""
 
 
+class StopRejected(RuntimeError):
+    """Биржа не приняла защитный стоп. immediate — цена уже за уровнем стопа."""
+
+    def __init__(self, msg: str, immediate: bool = False):
+        super().__init__(msg)
+        self.immediate = immediate
+
+
+STOP_RETRY_MS = 5 * 60_000  # не поставился стоп — следующая попытка через 5 минут
+
+
+def merge_fills(a: Fill, b: Fill) -> Fill:
+    """Одна продажа из двух частей: часть продал стоп на бирже, остаток — бот по рынку."""
+    amount = a.amount + b.amount
+    return Fill(amount=amount, price=(a.amount * a.price + b.amount * b.price) / amount,
+                fee=a.fee + b.fee, unsold=b.unsold)
+
+
 class Trader:
     def __init__(self, bot: Dict[str, Any], broker, state: Dict[str, Any],
                  record_trade: Callable[[Dict[str, Any]], Awaitable[None]],
                  log: Callable[[str], None],
-                 persist: Callable[[], None] = lambda: None):
+                 persist: Callable[[], None] = lambda: None,
+                 alert: Callable[[str], None] = lambda msg: None):
         self.bot = bot
         self.p = bot["params"]
         self.market = bot["market"]
@@ -36,6 +56,7 @@ class Trader:
         self.record_trade = record_trade
         self.log = log
         self.persist = persist  # сохранить state в базу
+        self.alert = alert      # тревога: в журнал и в Telegram
 
     # ---------- вспомогательное ----------
 
@@ -145,11 +166,135 @@ class Trader:
         dust = self.state.get("dust") or {"qty": 0.0, "cost": 0.0}
         return pos["qty"] + dust["qty"], pos["cost"] + dust["cost"]
 
-    async def close(self, price: float, reason: str, ts: int) -> None:
+    async def close(self, price: float, reason: str, ts: int, part: Optional[Fill] = None) -> None:
+        """Закрыть позицию по рынку. part — то, что уже продал стоп на бирже."""
         pos = self.pos
+        if pos.get("stop"):
+            # Стоп на бирже держит монеты и может сработать одновременно с нами — снимаем его первым.
+            released = await self._release_stop(price, ts)
+            if released is False:
+                return  # позицию уже закрыл стоп на бирже, сделка записана
+            part = released or part
         qty, _ = self._with_dust(pos)
+        if part:
+            qty = max(qty - part.amount, 0.0)
         order = {"action": "close", "side": pos["side"], "ts": ts, "reason": reason}
-        fill = await self._send(order, lambda cid: self.broker.close(pos["side"], qty, price, cid))
+        try:
+            fill = await self._send(order, lambda cid: self.broker.close(pos["side"], qty, price, cid))
+        except ValueError:
+            if not part:
+                raise
+            fill = None  # остаток меньше минимального ордера — останется на счёте
+        if part:
+            fill = merge_fills(part, fill) if fill else Fill(part.amount, part.price, part.fee, unsold=qty)
+        await self._apply(order, fill)
+
+    # ---------- стоп на бирже ----------
+    # Стоп-лосс внутри программы работает, только пока она запущена и на связи. Поэтому на
+    # демо-счёте и реальных деньгах тот же уровень ставится ещё и стоп-ордером на Binance:
+    # он сработает, даже если компьютер выключен. Уровень считается от средней цены, так что
+    # после каждого усреднения стоп переставляется на новый уровень и на весь объём.
+
+    def _wants_exchange_stop(self) -> bool:
+        return (self.p["stop_loss_pct"] > 0 and self.p.get("exchange_stop", True)
+                and getattr(self.broker, "exchange_stops", False))
+
+    async def sync_stop(self, price: float, now: int) -> None:
+        """Держит стоп на бирже в соответствии с позицией и настройками."""
+        pos = self.pos
+        if not pos or self.state.get("pending"):
+            return
+        st = pos.get("stop")
+        if not self._wants_exchange_stop():
+            if st:
+                await self._drop_stop(price, now, "выключен в настройках")
+            return
+        level = self.sl_level(pos)
+        qty, _ = self._with_dust(pos)
+        if st and math.isclose(st["level"], level, rel_tol=1e-9) and math.isclose(st["want"], qty, rel_tol=1e-9):
+            return
+        if st and not await self._drop_stop(price, now, "переставляю на новый уровень"):
+            return
+        if now < pos.get("stop_retry_at", 0):
+            return
+        cid = "bs" + secrets.token_hex(10)  # свой ID: если ответ потеряется, стоп найдётся по нему
+        try:
+            ref = await self.broker.place_stop(pos["side"], qty, level, cid)
+        except OrderStatusUnknown:
+            pos["stop"] = {"id": None, "cid": cid, "price": level, "qty": qty, "level": level, "want": qty}
+            self.persist()
+            return
+        except StopRejected as e:
+            pos["stop_retry_at"] = now + STOP_RETRY_MS
+            if not e.immediate and pos.get("stop_error") != str(e):
+                self.alert(f"Не удалось поставить стоп на бирже: {e}. "
+                           f"Пока бот запущен, стоп работает внутри программы.")
+            pos["stop_error"] = str(e)
+            self.persist()
+            return
+        pos["stop"] = {**ref, "level": level, "want": qty}
+        pos.pop("stop_error", None)
+        pos.pop("stop_retry_at", None)
+        self.persist()
+        self.log(f"Стоп на бирже: {ref['qty']:.6g} по {ref['price']:.6g}")
+
+    async def _drop_stop(self, price: float, now: int, why: str) -> bool:
+        """Снять стоп с биржи. False — стоп за это время успел сработать, позиция закрыта."""
+        released = await self._release_stop(price, now)
+        if released is False:
+            return False
+        if released:  # стоп-лимит успел продать часть — продаём остальное
+            await self.close(price, "стоп-лосс на бирже", now, part=released)
+            return False
+        self.log(f"Стоп на бирже снят: {why}")
+        return True
+
+    async def _release_stop(self, price: float, ts: int):
+        """Снимает стоп перед закрытием позиции. Возвращает None — стоп снят; Fill — стоп-лимит
+        успел продать часть; False — стоп уже сработал, и сделка записана."""
+        pos, st = self.pos, self.pos["stop"]
+        try:
+            part = await self.broker.cancel_stop(st)
+        except Exception:
+            status, fill = await self.broker.check_stop(st, price)
+            if status == "filled":
+                await self._stop_filled(fill, ts)
+                return False
+            if status != "gone":  # стоп ещё на бирже или исполняется — продавать нельзя
+                raise
+            part = fill
+        pos["stop"] = None
+        self.persist()
+        return part
+
+    async def check_stop(self, price: float, ts: int) -> None:
+        """Проверка стопа на бирже на каждом шаге: сработал — записываем сделку,
+        пропал — поставим заново, стоп-лимит застрял — продаём остаток по рынку."""
+        pos = self.pos
+        st = pos.get("stop") if pos else None
+        if not st:
+            return
+        status, fill = await self.broker.check_stop(st, price)
+        if status == "filled":
+            await self._stop_filled(fill, ts)
+        elif status == "stuck":
+            await self.close(price, "стоп-лосс на бирже", ts)
+        elif status == "gone":
+            pos["stop"] = None
+            self.persist()
+            if fill:
+                await self.close(price, "стоп-лосс на бирже", ts, part=fill)
+            else:
+                self.log("Стоп на бирже снят или истёк — поставлю заново")
+
+    async def _stop_filled(self, fill: Fill, ts: int) -> None:
+        pos = self.pos
+        if self.market == "spot":
+            qty, _ = self._with_dust(pos)
+            fill.unsold = max(qty - fill.amount, 0.0)
+        pos["stop"] = None
+        order = {"action": "close", "side": pos["side"], "ts": ts, "reason": "стоп-лосс на бирже"}
+        self.state["pending"] = None
         await self._apply(order, fill)
 
     # ---------- ордер «в пути» ----------
