@@ -195,7 +195,8 @@ class Manager:
         last_ts = closed[-1][0]
         if state.get("last_candle_ts") != last_ts:
             state["last_candle_ts"] = last_ts  # сначала отмечаем: одна свеча — максимум одна попытка
-            ind = prepare(closed, trader.p)
+            # в отдельном потоке: медленный сигнал-скрипт не должен задерживать других ботов
+            ind = await asyncio.to_thread(prepare, closed, trader.p)
             await trader.on_candle(ind, len(closed) - 1, price, now)
 
         # после входа или усреднения ставим или переставляем стоп на бирже

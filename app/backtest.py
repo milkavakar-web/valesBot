@@ -5,6 +5,7 @@
 исполняются по своему уровню, а если свеча открылась уже за уровнем — по цене
 открытия. Ликвидация на фьючерсах не моделируется.
 """
+import asyncio
 from collections import OrderedDict
 from typing import Any, Dict, List, Optional
 
@@ -111,7 +112,7 @@ async def run_backtest(bot: Dict[str, Any], candles: List[list], start: int = 1)
 
     trader = Trader(bot, PaperBroker(bot["market"]), state, record, lambda m: None)
     closes = [float(c[4]) for c in candles]
-    ind = prepare(candles, p)
+    ind = await asyncio.to_thread(prepare, candles, p)  # сигнал-скрипт может считать долго
 
     equity: List[float] = []
     signal_bars = 0   # свечей, на которых выполнялось условие входа

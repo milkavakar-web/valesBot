@@ -171,6 +171,16 @@ input:focus, select:focus { border-color: var(--accent); outline: none; box-shad
 .hint { font-size: 13px; color: var(--muted); margin: 10px 0 0; }
 .hint.warn { color: var(--warn); }
 .preset-about { font-size: 13px; color: var(--muted); margin: 8px 0 0; }
+textarea.code { display: block; width: 100%; min-height: 380px; margin-top: 8px; padding: 10px 12px; resize: vertical;
+  font: 13px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace; tab-size: 4; white-space: pre; overflow-wrap: normal;
+  background: var(--paper); color: var(--ink); border: 1px solid var(--rule); border-radius: 7px; }
+textarea.code:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent); }
+.sig-item { padding: 14px 0; border-bottom: 1px solid var(--rule); }
+.sig-item h3 { margin: 0; font-size: 15px; }
+.sig-item p { margin: 4px 0 0; }
+.sig-actions { display: flex; gap: 14px; margin-top: 6px; }
+.sig-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 14px; }
+.sig-result { margin: 12px 0 0; font-size: 14px; white-space: pre-wrap; }
 
 /* ---------- конструктор условий ---------- */
 .ruleset { margin-top: 14px; padding: 10px 12px 12px; border: 1px solid var(--rule); border-radius: 10px; }
@@ -241,6 +251,7 @@ pre.logs { white-space: pre-wrap; font-size: 13px; line-height: 1.55; margin: 0;
       <p class="summary" id="summary">Загрузка…</p>
     </div>
     <div class="top-actions">
+      <button class="btn" id="sigBtn" title="Свои сигналы на входе — небольшие скрипты на Python">Сигналы</button>
       <button class="btn" id="tgBtn">Telegram</button>
       <button class="btn" id="tunedBots" title="Бумажные боты с настройками, подобранными по истории BTC/USDT за год">Лучшие боты</button>
       <button class="btn primary" id="newBot">Новый бот</button>
@@ -308,6 +319,15 @@ pre.logs { white-space: pre-wrap; font-size: 13px; line-height: 1.55; margin: 0;
         <div class="seg" role="radiogroup" aria-label="Как входить">
           <label><input type="radio" name="signal" value="rules" checked>По условиям</label>
           <label><input type="radio" name="signal" value="none">Сразу, без условий</label>
+          <label><input type="radio" name="signal" value="script">Сигнал-скрипт</label>
+        </div>
+        <div id="scriptBox" hidden style="margin-top:14px">
+          <label class="f wide">Сигнал
+            <select id="scriptSel"></select>
+          </label>
+          <p class="preset-about" id="scriptAbout"></p>
+          <div class="grid" id="scriptParams" style="margin-top:12px"></div>
+          <p class="hint"><button type="button" class="link" id="scriptManage">Добавить или изменить сигналы…</button></p>
         </div>
         <div style="margin-top:14px">
           <div class="seg" role="radiogroup" aria-label="Направление">
@@ -432,6 +452,36 @@ pre.logs { white-space: pre-wrap; font-size: 13px; line-height: 1.55; margin: 0;
   </div>
 </dialog>
 
+<dialog class="drawer" id="sigDialog" aria-labelledby="sigTitle">
+  <div class="drawer-inner">
+    <div class="drawer-head"><h2 id="sigTitle">Сигналы</h2><button type="button" class="link" data-close>Закрыть</button></div>
+    <div class="drawer-body">
+      <div id="sigListBox">
+        <p class="hint" style="margin-top:14px">Свой сигнал на входе — небольшой файл на Python с функцией <code>signal(candles, p)</code>. Бот вызывает её на закрытии каждой свечи, она отвечает «лонг», «шорт» или «ничего», а может задать и стоп с тейком. Сохранённый сигнал сразу появляется в редакторе бота («Когда входить» → «Сигнал-скрипт»); после правки работающие боты подхватят новый код на следующей свече — перезапускать ничего не нужно.</p>
+        <div class="sig-bar"><button type="button" class="btn primary" id="sigNew">Добавить сигнал</button></div>
+        <p class="hint warn" id="sigLocked" hidden></p>
+        <div id="sigList" style="margin-top:8px"></div>
+      </div>
+      <div id="sigEditBox" hidden>
+        <h3 id="sigEditTitle" style="margin:18px 0 0">Новый сигнал</h3>
+        <p class="hint">Нужны <code>NAME</code> и <code>def signal(candles, p)</code>. <code>candles[-1]</code> — свеча, которая только что закрылась (<code>.open .high .low .close .volume .time</code>). Вернуть <code>None</code>, <code>"long"</code>, <code>"short"</code> или <code>{"side": "long", "stop": цена, "take": цена, "why": "текст"}</code>. Настройки из <code>PARAMS</code> появятся в редакторе бота, комментарий после значения станет подписью. Свечи бот берёт с Binance сам: <code>ccxt</code>, циклы и <code>print</code> из готовых скриптов не нужны, <code>pandas</code> в программе нет.</p>
+        <div class="sig-bar">
+          <button type="button" class="btn" id="sigFileBtn">Загрузить файл .py</button>
+          <input type="file" id="sigFile" accept=".py,text/x-python,text/plain" hidden>
+          <button type="button" class="btn" id="sigTemplate">Вставить шаблон</button>
+        </div>
+        <textarea class="code" id="sigCode" spellcheck="false" autocomplete="off" aria-label="Код сигнала"></textarea>
+        <p class="sig-result" id="sigResult"></p>
+        <div class="sig-bar">
+          <button type="button" class="btn primary" id="sigSave">Проверить и сохранить</button>
+          <button type="button" class="btn" id="sigCancel">Назад к списку</button>
+        </div>
+        <p class="hint">Перед сохранением сигнал прогоняется на 2000 пробных свечах — так видны ошибки, которые проявляются не на первой свече. Код выполняется внутри программы со всеми её правами: добавляйте только свой код или тот, который прочитали.</p>
+      </div>
+    </div>
+  </div>
+</dialog>
+
 <dialog class="drawer" id="logDialog">
   <div class="drawer-inner">
     <div class="drawer-head"><h2 id="logTitle">Журнал</h2><button type="button" class="link" data-close>Закрыть</button></div>
@@ -505,6 +555,7 @@ function recipe(b) {
   const p = b.params, R = p.rules || {}, parts = [], sides = SIDES[p.direction] || ["long"];
   const word = s => s === "long" ? "лонг" : "шорт";
   if (p.signal === "none") parts.push(p.direction === "short" ? "шорт сразу, без условий" : "покупка сразу, без условий");
+  else if (p.signal === "script") parts.push(`${sides.map(word).join(" и ")} по сигналу «${scriptName(p.script)}»`);
   else sides.forEach(s => { if (R[s]?.length) parts.push(`${word(s)}, когда ${setText(R[s])}`); });
   sides.forEach(s => { if (R["exit_" + s]?.length) parts.push(`закрыть ${word(s)}, когда ${setText(R["exit_" + s])}`); });
   const risk = [];
@@ -588,7 +639,7 @@ function renderBots() {
 
 function stopFact(b) {  // где сейчас живёт стоп-лосс позиции
   const pos = b.state.position, p = b.params;
-  if (!(p.stop_loss_pct > 0) || !b.levels?.sl) return "";
+  if (!b.levels?.sl) return "";  // стоп в процентах или стоп, который задал сигнал-скрипт
   if (pos.stop?.id) return `<div class="fact"><span>Стоп на бирже</span><b>${num(pos.stop.price)}</b></div>`;
   if (b.mode === "paper" || p.exchange_stop === false) return `<div class="fact"><span>Стоп в программе</span><b>${num(b.levels.sl)}</b></div>`;
   return `<div class="fact"><span>Стоп на бирже</span><b class="neg">${pos.stop ? "проверяю…" : "не стоит"}</b></div>`;
@@ -866,7 +917,9 @@ function fillForm(bot) {
   setRadio("market", bot?.market || "spot");
   setRadio("mode", bot?.mode || "paper");
   setRadio("direction", p.direction);
-  setRadio("signal", p.signal === "none" ? "none" : "rules");
+  setRadio("signal", ["none", "script"].includes(p.signal) ? p.signal : "rules");
+  fillScriptSelect(p.script);
+  renderScriptParams(p.script_params || {});
   PARAM_FIELDS.forEach(k => E[k].value = p[k]);
   E.exit_on_opposite.checked = !!p.exit_on_opposite;
   E.exchange_stop.checked = p.exchange_stop !== false;
@@ -890,6 +943,8 @@ function readForm() {
   const params = {};
   PARAM_FIELDS.forEach(k => params[k] = Number(E[k].value));
   params.signal = getRadio("signal");
+  params.script = $("#scriptSel").value;
+  params.script_params = Object.fromEntries($$("#scriptParams input").map(el => [el.dataset.key, Number(el.value)]));
   params.rules = readRules();
   params.direction = getRadio("direction");
   params.exit_on_opposite = E.exit_on_opposite.checked;
@@ -910,12 +965,16 @@ function syncForm() {
   // показываем только наборы для выбранного направления
   $$(".ruleset", F).forEach(box => {
     const set = box.dataset.set, rows = p.rules[set] || [];
-    box.hidden = !sides.includes(set.replace("exit_", "")) || (!set.startsWith("exit") && p.signal === "none");
+    box.hidden = !sides.includes(set.replace("exit_", "")) || (!set.startsWith("exit") && p.signal !== "rules");
     box.querySelector(".rule-text").textContent = rows.length ? `${SET_PREFIX[set]} ${setText(rows)}.` : "";
   });
-  $("#rulesHint").hidden = p.signal === "none";
+  $("#rulesHint").hidden = p.signal !== "rules";
+  $("#scriptBox").hidden = p.signal !== "script";
+  const sc = S.scripts.find(x => x.id === p.script);
+  $("#scriptAbout").textContent = !S.scripts.length ? "Сигналов пока нет — добавьте первый в окне «Сигналы»."
+    : sc ? (sc.error ? "Ошибка в файле сигнала: " + sc.error : sc.about + (sc.levels ? " Стоп и тейк для каждой сделки задаёт сам сигнал; тейк и стоп в процентах ниже нужны, только если сигнал их не вернул." : "")) : "";
   $("#flipField").hidden = dir !== "both";
-  $("#exStopField").hidden = $("#exStopHint").hidden = !(p.stop_loss_pct > 0);
+  $("#exStopField").hidden = $("#exStopHint").hidden = !(p.stop_loss_pct > 0 || (p.signal === "script" && sc?.levels));
   $("#exStopHint").textContent = d.mode === "paper"
     ? "В бумажной торговле стоп работает внутри программы. На демо-счёте и реальных деньгах он будет стоять ордером на Binance и сработает, даже если программа выключена."
     : E.exchange_stop.checked
@@ -933,9 +992,10 @@ function syncForm() {
     : isFinite(p.order_size) ? `В сделке ${num(p.order_size, 2)} USDT${lev > 1 ? ` маржи, позиция ${num(p.order_size * lev, 2)} USDT` : ""}.` : "";
 
   const warns = [];
-  if (fut && lev > 1 && !(p.stop_loss_pct > 0)) warns.push("Без стоп-лосса при плече биржа может ликвидировать позицию.");
+  if (fut && lev > 1 && !(p.stop_loss_pct > 0) && !(p.signal === "script" && sc?.levels)) warns.push("Без стоп-лосса при плече биржа может ликвидировать позицию.");
   if (p.stop_loss_pct > 0 && p.safety_orders > 0 && p.stop_loss_pct <= dev) warns.push("Стоп ближе последнего усреднения: часть усреднений может не успеть сработать.");
-  const noExit = sides.some(sd => !p.rules["exit_" + sd].length) && !(p.take_profit_pct > 0) && !(p.stop_loss_pct > 0) && !(E.exit_on_opposite.checked && dir === "both");
+  const noExit = sides.some(sd => !p.rules["exit_" + sd].length) && !(p.take_profit_pct > 0) && !(p.stop_loss_pct > 0) && !(E.exit_on_opposite.checked && dir === "both")
+    && !(p.signal === "script" && sc?.levels);
   if (noExit) warns.push("Боту нужен способ выйти: тейк-профит, стоп-лосс или условия выхода.");
   if (p.signal === "rules" && sides.some(sd => !p.rules[sd].length)) warns.push("Добавьте условия входа для выбранного направления.");
   $("#exitWarn").textContent = warns.join(" ");
@@ -964,6 +1024,106 @@ function openEditor(bot) {
 F.addEventListener("input", syncForm);
 F.addEventListener("change", syncForm);
 $("#preset").onchange = e => applyPreset(e.target.value);
+
+// ---------- сигналы-скрипты ----------
+S.scripts = [];
+function scriptName(id) { return S.scripts.find(x => x.id === id)?.name || id; }
+function fillScriptSelect(cur) {
+  const sel = $("#scriptSel");
+  sel.innerHTML = S.scripts.map(x => `<option value="${esc(x.id)}">${esc(x.name)}${x.error ? " — ошибка" : ""}</option>`).join("");
+  if (cur && S.scripts.some(x => x.id === cur)) sel.value = cur;
+}
+function renderScriptParams(values) {
+  const sc = S.scripts.find(x => x.id === $("#scriptSel").value);
+  $("#scriptParams").innerHTML = sc ? Object.entries(sc.params).map(([k, def]) => `<label class="f">${esc(sc.labels?.[k] || k)}
+    <input type="number" step="any" data-key="${esc(k)}" value="${values[k] ?? def}"></label>`).join("") : "";
+}
+$("#scriptSel").onchange = () => { renderScriptParams({}); syncForm(); };
+// Шаблон DCA с усреднениями не сочетается со стопом, который ставит сигнал: переходя на скрипт,
+// начинаем со своих настроек без усреднений.
+$$("input[name=signal]", F).forEach(el => el.addEventListener("change", () => {
+  if (el.value !== "script" || !el.checked) return;
+  $("#preset").value = ""; $("#presetAbout").textContent = "";
+  E.safety_orders.value = 0;
+  syncForm();
+}));
+async function reloadScripts() {
+  S.scripts = await api("/api/scripts");
+  const cur = $("#scriptSel").value, vals = readForm().params.script_params;
+  fillScriptSelect(cur);
+  renderScriptParams(cur === $("#scriptSel").value ? vals : {});
+}
+
+function sigShowList() { $("#sigListBox").hidden = false; $("#sigEditBox").hidden = true; }
+async function openSignals() {
+  sigShowList();
+  $("#sigLocked").hidden = S.meta.scripts_editable;
+  $("#sigLocked").textContent = "Панель открыта не с того компьютера, где запущена программа: загружать и менять сигналы отсюда нельзя — скрипт выполняется со всеми правами программы. Разрешить: ALLOW_SCRIPTS=1 в .env.";
+  $("#sigNew").disabled = !S.meta.scripts_editable;
+  await reloadScripts();
+  $("#sigList").innerHTML = S.scripts.length ? S.scripts.map(x => `<div class="sig-item">
+      <h3>${esc(x.name)}</h3>
+      ${x.about ? `<p class="subtle">${esc(x.about)}</p>` : ""}
+      ${x.error ? `<p class="err">${esc(x.error)}</p>` : ""}
+      <p class="subtle">Файл <code>data/signals/${esc(x.id)}.py</code>${Object.keys(x.params).length ? " · настройки: " + Object.entries(x.params).map(([k, v]) => `${esc(k)} ${num(v)}`).join(", ") : ""}${x.levels ? " · сам задаёт стоп и тейк" : ""} · ботов: ${x.bots}</p>
+      <div class="sig-actions">
+        <button type="button" class="link" data-sig-edit="${esc(x.id)}">${S.meta.scripts_editable ? "Изменить" : "Показать код"}</button>
+        ${S.meta.scripts_editable ? `<button type="button" class="link danger" data-sig-del="${esc(x.id)}">Удалить</button>` : ""}
+      </div></div>`).join("")
+    : `<p class="subtle" style="margin-top:14px">Сигналов пока нет.</p>`;
+  if (!$("#sigDialog").open) $("#sigDialog").showModal();
+}
+function sigEdit(id, code) {
+  S.sigEditing = id;
+  $("#sigListBox").hidden = true; $("#sigEditBox").hidden = false;
+  $("#sigEditTitle").textContent = id ? `Сигнал: ${scriptName(id)}` : "Новый сигнал";
+  $("#sigCode").value = code;
+  $("#sigCode").readOnly = !S.meta.scripts_editable;
+  $("#sigSave").hidden = $("#sigFileBtn").hidden = $("#sigTemplate").hidden = !S.meta.scripts_editable;
+  $("#sigResult").textContent = ""; $("#sigResult").className = "sig-result";
+  $("#sigCode").focus();
+}
+$("#sigBtn").onclick = () => openSignals().catch(e => toast(e.message, true));
+$("#scriptManage").onclick = () => openSignals().catch(e => toast(e.message, true));
+$("#sigNew").onclick = () => sigEdit(null, S.meta.script_template);
+$("#sigCancel").onclick = () => openSignals().catch(e => toast(e.message, true));
+$("#sigTemplate").onclick = () => { $("#sigCode").value = S.meta.script_template; };
+$("#sigFileBtn").onclick = () => $("#sigFile").click();
+$("#sigFile").onchange = async e => {
+  const f = e.target.files[0];
+  if (f) $("#sigCode").value = await f.text();
+  e.target.value = "";
+};
+$("#sigCode").addEventListener("keydown", e => {  // Tab в коде — четыре пробела, а не переход к кнопке
+  if (e.key !== "Tab" || e.shiftKey || e.ctrlKey || e.altKey) return;
+  e.preventDefault();
+  document.execCommand("insertText", false, "    ");
+});
+$("#sigList").addEventListener("click", async e => {
+  const ed = e.target.closest("[data-sig-edit]"), del = e.target.closest("[data-sig-del]");
+  try {
+    if (ed) { const x = await api(`/api/scripts/${ed.dataset.sigEdit}`); sigEdit(x.id, x.code); }
+    if (del) {
+      if (!confirm(`Удалить сигнал «${scriptName(del.dataset.sigDel)}»?`)) return;
+      await api(`/api/scripts/${del.dataset.sigDel}`, { method: "DELETE" });
+      toast("Сигнал удалён"); await openSignals();
+    }
+  } catch (err) { toast(err.message, true); }
+});
+$("#sigSave").onclick = async () => {
+  const btn = $("#sigSave"), out = $("#sigResult");
+  btn.disabled = true; out.className = "sig-result subtle"; out.textContent = "Проверяю…";
+  try {
+    const r = await api("/api/scripts", { method: "POST", body: { code: $("#sigCode").value, id: S.sigEditing } });
+    S.sigEditing = r.id;
+    $("#sigEditTitle").textContent = `Сигнал: ${r.name}`;
+    out.className = "sig-result pos";
+    out.textContent = `Сохранено в data/signals/${r.id}.py. ${r.test}.`;
+    await reloadScripts();
+    if ($("#editor").open) syncForm();
+  } catch (err) { out.className = "sig-result neg"; out.textContent = err.message; }
+  btn.disabled = false;
+};
 F.addEventListener("submit", async e => {
   e.preventDefault();
   const d = readForm();
@@ -1307,6 +1467,7 @@ $("#chartDialog").addEventListener("close", () => { clearInterval(S.chartTimer);
   catch (e) { $("#summary").textContent = "Не удалось связаться с программой бота: " + e.message; return; }
   S.ind = Object.fromEntries(S.meta.indicators.map(x => [x.id, x]));
   S.ops = Object.fromEntries(S.meta.ops.map(o => [o.id, o.name]));
+  S.scripts = S.meta.scripts;
   $("#tf").innerHTML = S.meta.timeframes.map(t => `<option>${t}</option>`).join("");
   $("#preset").innerHTML = `<option value="">Свои настройки</option>` + S.meta.presets.map(p => `<option value="${p.id}">${esc(p.title)}</option>`).join("");
   await loadBots(true); loadTrades();

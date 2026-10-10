@@ -7,9 +7,14 @@ from PyInstaller.utils.hooks import collect_submodules
 a = Analysis(
     ["app/launcher.py"],
     pathex=["."],
-    datas=[("app/static", "app/static"), (".env.example", ".")],
-    # uvicorn подгружает цикл событий и протоколы по имени — явно включаем их в сборку
-    hiddenimports=collect_submodules("uvicorn") + ["app.main"],
+    datas=[("app/static", "app/static"), ("app/signals_examples", "app/signals_examples"),
+           (".env.example", ".")],
+    # uvicorn подгружает цикл событий и протоколы по имени — явно включаем их в сборку.
+    # Модули стандартной библиотеки — для сигналов-скриптов: сама программа их не импортирует,
+    # и без этого их не было бы в exe.
+    hiddenimports=collect_submodules("uvicorn") + ["app.main"] + [
+        "statistics", "datetime", "decimal", "fractions", "bisect", "heapq", "collections",
+        "itertools", "functools", "math", "random", "json", "re", "zoneinfo"],
     excludes=["tkinter"],
 )
 pyz = PYZ(a.pure)

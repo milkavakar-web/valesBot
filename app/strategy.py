@@ -2,12 +2,13 @@
 import re
 from typing import Any, Dict, List, Optional
 
-from . import rules
+from . import rules, scripts
 
 TIMEFRAMES = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "1d"]
 TF_MS = {"1m": 60_000, "3m": 180_000, "5m": 300_000, "15m": 900_000, "30m": 1_800_000,
          "1h": 3_600_000, "2h": 7_200_000, "4h": 14_400_000, "1d": 86_400_000}
-SIGNALS = ["rules", "none"]
+SIGNALS = ["rules", "none", "script"]
+SCRIPT_KEY = "__script__"  # в ind: результат сигнала-скрипта на каждой свече
 MARKETS = ["spot", "futures"]
 MODES = ["paper", "demo", "live"]
 DIRECTIONS = ["long", "short", "both"]
@@ -34,7 +35,9 @@ PRICE = _i("price")
 RSI14 = _i("rsi", period=14)
 
 DEFAULT_PARAMS: Dict[str, Any] = {
-    "signal": "rules",        # rules — по условиям, none — входить сразу
+    "signal": "rules",        # rules — по условиям, none — входить сразу, script — сигнал-скрипт
+    "script": "",             # signal=script: файл data/signals/<script>.py
+    "script_params": {},      # signal=script: настройки из PARAMS скрипта
     "rules": _sets(long=[_c(RSI14, "below", 30)], short=[_c(RSI14, "above", 70)]),
     "direction": "long",      # long | short | both (short/both только для фьючерсов)
     "order_size": 20.0,       # USDT на первый ордер (на фьючерсах это маржа)
@@ -255,6 +258,14 @@ def normalize_bot(data: Dict[str, Any]) -> Dict[str, Any]:
     if market == "spot" and p["direction"] != "long":
         raise ValueError("На споте можно торговать только в лонг")
     p["rules"] = rules.normalize(src.get("rules"))
+    script = None
+    if p["signal"] == "script":
+        if not src.get("script"):
+            raise ValueError("Выберите сигнал-скрипт")
+        script = scripts.get(str(src["script"]))
+        p["script"], p["script_params"] = script.id, scripts.clean_params(script, src.get("script_params"))
+    else:
+        p["script"], p["script_params"] = "", {}
 
     p["order_size"] = _num(src, "order_size", 1, 1_000_000)
     p["leverage"] = _num(src, "leverage", 1, 20, True) if market == "futures" else 1
@@ -275,7 +286,7 @@ def normalize_bot(data: Dict[str, Any]) -> Dict[str, Any]:
             if not p["rules"][side]:
                 raise ValueError(f"Добавьте хотя бы одно условие {names[side]}")
     can_exit = p["take_profit_pct"] > 0 or p["stop_loss_pct"] > 0 or p["exit_on_opposite"] or \
-        all(p["rules"][f"exit_{s}"] for s in _sides(p))
+        all(p["rules"][f"exit_{s}"] for s in _sides(p)) or (script is not None and script.levels)
     if not can_exit:
         raise ValueError("Боту нужен способ выйти: тейк-профит, стоп-лосс или условия выхода")
 
@@ -302,20 +313,30 @@ def max_margin(p: Dict[str, Any]) -> float:
 def warmup_candles(p: Dict[str, Any]) -> int:
     """Сколько свечей до начала периода нужно индикаторам, чтобы их значения
     перестали зависеть от того, с какой свечи начали считать."""
-    return rules.warmup({k: p["rules"][k] for k in active_sets(p)})
+    n = rules.warmup({k: p["rules"][k] for k in active_sets(p)})
+    if p["signal"] == "script":
+        n = max(n, scripts.get(p["script"]).warmup)
+    return n
 
 
 # ---------- сигналы ----------
 
 def prepare(ohlcv: List[list], p: Dict[str, Any]) -> Dict[str, list]:
-    """Индикаторы из условий по свечам [время, open, high, low, close, volume]."""
-    return rules.compute(ohlcv, {k: p["rules"][k] for k in active_sets(p)})
+    """Индикаторы из условий по свечам [время, open, high, low, close, volume].
+    Для сигнала-скрипта ещё и его результат на каждой свече (ключ SCRIPT_KEY)."""
+    ind = rules.compute(ohlcv, {k: p["rules"][k] for k in active_sets(p)})
+    if p["signal"] == "script":
+        ind[SCRIPT_KEY] = scripts.compute(p["script"], ohlcv, p["script_params"])
+    return ind
 
 
 def signal_at(ind: Dict[str, list], i: int, p: Dict[str, Any]) -> Optional[str]:
     """Сигнал на вход по закрытой свече i: 'long', 'short' или None."""
     if p["signal"] == "none":  # входим сразу после закрытия предыдущей сделки
         return "short" if p["direction"] == "short" else "long"
+    if p["signal"] == "script":
+        r = ind[SCRIPT_KEY][i]
+        return r["side"] if r and r["side"] in _sides(p) else None
     hits = [s for s in _sides(p) if rules.check_set(ind, p["rules"][s], i)]
     return hits[0] if len(hits) == 1 else None
 
@@ -332,13 +353,28 @@ def describe_signal(ind: Dict[str, list], i: int, p: Dict[str, Any], sig: str) -
     """Почему сработал сигнал на свече i — для журнала, сделок и бэктеста."""
     if p["signal"] == "none":
         return "вход без условий"
+    if p["signal"] == "script":
+        why = (ind[SCRIPT_KEY][i] or {}).get("why")
+        name = scripts.get(p["script"]).name
+        return f"{name}: {why}" if why else f"сигнал «{name}»"
     return rules.explain(ind, p["rules"][sig], i)
+
+
+def signal_levels(ind: Dict[str, list], i: int, p: Dict[str, Any]) -> Dict[str, float]:
+    """Стоп и тейк, которые сигнал-скрипт задал для сделки по свече i (цены)."""
+    if p["signal"] != "script" or not ind[SCRIPT_KEY][i]:
+        return {}
+    r = ind[SCRIPT_KEY][i]
+    return {k: r[k] for k in ("stop", "take") if k in r}
 
 
 def entry_condition(p: Dict[str, Any]) -> Optional[str]:
     """Условия входа словами: «RSI(14) ниже 30 и цена выше EMA(200)»."""
     if p["signal"] == "none":
         return None
+    if p["signal"] == "script":
+        sp = ", ".join(f"{k} {v:g}" for k, v in p["script_params"].items())
+        return f"сигнал «{scripts.get(p['script']).name}»" + (f" ({sp})" if sp else "")
     sides = _sides(p)
     if len(sides) == 1:
         return rules.text(p["rules"][sides[0]])

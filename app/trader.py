@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 from .strategy import (describe_signal, exit_reason, indicator_snapshot, signal_at,
-                       so_deviation_pct)
+                       signal_levels, so_deviation_pct)
 
 
 @dataclass
@@ -79,11 +79,24 @@ class Trader:
         base = pos["first_price"]
         return base * (1 - dev) if pos["side"] == "long" else base * (1 + dev)
 
+    # Сигнал-скрипт может задать стоп и тейк ценой для конкретной сделки (pos["sl_price"],
+    # pos["tp_price"]) — тогда они главнее процентов из настроек.
+
+    def has_tp(self, pos: Dict[str, Any]) -> bool:
+        return self.p["take_profit_pct"] > 0 or bool(pos.get("tp_price"))
+
+    def has_sl(self, pos: Dict[str, Any]) -> bool:
+        return self.p["stop_loss_pct"] > 0 or bool(pos.get("sl_price"))
+
     def tp_level(self, pos: Dict[str, Any]) -> float:
+        if pos.get("tp_price"):
+            return pos["tp_price"]
         tp = self.p["take_profit_pct"] / 100
         return pos["avg"] * (1 + tp) if pos["side"] == "long" else pos["avg"] * (1 - tp)
 
     def sl_level(self, pos: Dict[str, Any]) -> float:
+        if pos.get("sl_price"):
+            return pos["sl_price"]
         sl = self.p["stop_loss_pct"] / 100
         return pos["avg"] * (1 - sl) if pos["side"] == "long" else pos["avg"] * (1 + sl)
 
@@ -115,7 +128,7 @@ class Trader:
                 if sig == side:  # условия входа и выхода совпали — не заходим снова на той же свече
                     return
         if not pos and sig and self._allowed(sig):
-            await self.open(sig, price, ts, why)
+            await self.open(sig, price, ts, why, signal_levels(ind, i, self.p))
 
     async def on_price(self, price: float, ts: int, sim: bool = False) -> None:
         """Проверка стопа, усреднений и тейка. sim=True — исполнение по уровню (бэктест)."""
@@ -124,7 +137,7 @@ class Trader:
             return
         long = pos["side"] == "long"
 
-        if self.p["stop_loss_pct"] > 0:
+        if self.has_sl(pos):
             lvl = self.sl_level(pos)
             if price <= lvl if long else price >= lvl:
                 await self.close(lvl if sim else price, "стоп-лосс", ts)
@@ -137,16 +150,19 @@ class Trader:
                 break
             await self.add(k, lvl if sim else price, ts)
 
-        if self.p["take_profit_pct"] > 0:
+        if self.has_tp(pos):
             lvl = self.tp_level(pos)
             if price >= lvl if long else price <= lvl:
                 await self.close(lvl if sim else price, "тейк-профит", ts)
 
     # ---------- действия ----------
 
-    async def open(self, side: str, price: float, ts: int, reason: str = "сигнал") -> None:
+    async def open(self, side: str, price: float, ts: int, reason: str = "сигнал",
+                   levels: Optional[Dict[str, float]] = None) -> None:
         notional, margin = self._size(0)
         order = {"action": "open", "side": side, "margin": margin, "ts": ts, "reason": reason}
+        if levels:
+            order["levels"] = levels  # стоп и тейк от сигнала-скрипта
         fill = await self._send(order, lambda cid: self.broker.open(side, notional, price, cid))
         await self._apply(order, fill)
 
@@ -195,8 +211,8 @@ class Trader:
     # он сработает, даже если компьютер выключен. Уровень считается от средней цены, так что
     # после каждого усреднения стоп переставляется на новый уровень и на весь объём.
 
-    def _wants_exchange_stop(self) -> bool:
-        return (self.p["stop_loss_pct"] > 0 and self.p.get("exchange_stop", True)
+    def _wants_exchange_stop(self, pos: Dict[str, Any]) -> bool:
+        return (self.has_sl(pos) and self.p.get("exchange_stop", True)
                 and getattr(self.broker, "exchange_stops", False))
 
     async def sync_stop(self, price: float, now: int) -> None:
@@ -205,7 +221,7 @@ class Trader:
         if not pos or self.state.get("pending"):
             return
         st = pos.get("stop")
-        if not self._wants_exchange_stop():
+        if not self._wants_exchange_stop(pos):
             if st:
                 await self._drop_stop(price, now, "выключен в настройках")
             return
@@ -343,6 +359,11 @@ class Trader:
                 "avg": fill.price, "first_price": fill.price, "so_filled": 0,
                 "fees": fill.fee, "margin": order["margin"], "opened_ts": ts,
             }
+            lv = order.get("levels") or {}
+            if lv.get("stop"):
+                self.state["position"]["sl_price"] = lv["stop"]
+            if lv.get("take"):
+                self.state["position"]["tp_price"] = lv["take"]
             msg = (f"Вход в {'лонг' if side == 'long' else 'шорт'}: "
                    f"{fill.amount:.6g} по {fill.price:.6g}")
         elif order["action"] == "safety":

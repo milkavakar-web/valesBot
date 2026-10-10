@@ -1,4 +1,5 @@
 """Веб-панель и API."""
+import asyncio
 import logging
 import secrets
 import time
@@ -12,7 +13,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
-from . import config, db, rules
+from . import config, db, rules, scripts
 from .backtest import MAX_CANDLES, chart_data, fetch_history, run_backtest
 from .brokers import exchange_symbol, hub
 from .engine import manager
@@ -118,8 +119,8 @@ def _view(bot: Dict[str, Any]) -> Dict[str, Any]:
         tr = Trader(bot, None, st, None, None)
         levels = {
             "avg": pos["avg"],
-            "tp": tr.tp_level(pos) if p["take_profit_pct"] > 0 else None,
-            "sl": tr.sl_level(pos) if p["stop_loss_pct"] > 0 else None,
+            "tp": tr.tp_level(pos) if tr.has_tp(pos) else None,
+            "sl": tr.sl_level(pos) if tr.has_sl(pos) else None,
             "so": [{"price": tr.so_level(pos, k), "filled": k <= pos["so_filled"]}
                    for k in range(1, p["safety_orders"] + 1)],
         }
@@ -147,6 +148,9 @@ async def meta():
         "indicators": rules.catalog_api(),  # из этого описания панель строит конструктор условий
         "ops": [{"id": k, "name": v} for k, v in rules.OPS.items()],
         "presets": PRESETS,
+        "scripts": [s.info() for s in scripts.all_scripts()],
+        "scripts_editable": scripts.editable(),
+        "script_template": scripts.TEMPLATE,
         "live_allowed": config.ALLOW_LIVE,
         "has_live_keys": bool(config.BINANCE_API_KEY and config.BINANCE_API_SECRET),
         "has_demo_keys": bool(config.BINANCE_DEMO_API_KEY and config.BINANCE_DEMO_API_SECRET),
@@ -169,6 +173,60 @@ async def create_bot(data: Dict[str, Any]):
     bot = normalize_bot(data)
     bot_id = db.create_bot(bot)
     return _view(db.get_bot(bot_id))
+
+
+# ---------- сигналы-скрипты ----------
+
+def _scripts_editable() -> None:
+    if not scripts.editable():
+        raise HTTPException(403, "Скрипт выполняется со всеми правами программы, поэтому загружать "
+                                 "его можно только из панели, открытой на этом компьютере. Чтобы "
+                                 "разрешить из сети, поставьте ALLOW_SCRIPTS=1 в .env")
+
+
+def _script_users(sid: str):
+    return [b for b in db.list_bots()
+            if b["params"].get("signal") == "script" and b["params"].get("script") == sid]
+
+
+@app.get("/api/scripts")
+async def list_scripts():
+    return [{**s.info(), "bots": len(_script_users(s.id))} for s in scripts.all_scripts()]
+
+
+@app.get("/api/scripts/{sid}")
+async def get_script(sid: str):
+    s = next((s for s in scripts.all_scripts() if s.id == sid), None)
+    if not s:
+        raise HTTPException(404, "Сигнал не найден")
+    return s.info(with_code=True)
+
+
+@app.post("/api/scripts")
+async def save_script(data: Dict[str, Any]):
+    """Новый сигнал (id не задан) или правка существующего. Работающие боты подхватят
+    новый код на следующей свече — перезапускать ничего не нужно."""
+    _scripts_editable()
+    code, sid = data.get("code"), data.get("id") or None
+    if not isinstance(code, str) or not code.strip():
+        raise ValueError("Вставьте код сигнала")
+    if sid is None:
+        mod_name = scripts.slug(scripts.check(code).NAME)
+        if any(s.id == mod_name for s in scripts.all_scripts()):
+            raise ValueError("Сигнал с таким названием уже есть: поменяйте NAME или откройте "
+                             "тот сигнал и правьте его")
+    return await asyncio.to_thread(scripts.save, code, sid)
+
+
+@app.delete("/api/scripts/{sid}")
+async def delete_script(sid: str):
+    _scripts_editable()
+    users = _script_users(sid)
+    if users:
+        raise ValueError("Сигнал используют боты: " + ", ".join(b["name"] for b in users) +
+                         ". Сначала удалите их или переключите на другой сигнал")
+    scripts.delete(sid)
+    return {"ok": True}
 
 
 @app.post("/api/bots/tuned")
@@ -303,7 +361,7 @@ async def bot_chart(bot_id: int):
     if len(ohlcv) < 2:
         raise RuntimeError("Биржа вернула слишком мало свечей")
     start = max(0, min(warmup_candles(p), len(ohlcv) - 300))
-    ind = prepare(ohlcv, p)
+    ind = await asyncio.to_thread(prepare, ohlcv, p)
     first = ohlcv[start][0]
     # сделка случилась внутри свечи — на графике ставим её на время открытия этой свечи
     events = [{"ts": t["ts"] // tf_ms * tf_ms, "price": t["price"], "action": t["action"],

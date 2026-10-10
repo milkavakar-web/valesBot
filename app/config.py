@@ -23,6 +23,11 @@ PANEL_HOSTS = [h.strip().lower() for h in os.getenv("PANEL_HOSTS", "").split(","
 
 DB_PATH = os.getenv("DB_PATH", "data/bot.db")
 
+# Сигналы-скрипты (data/signals/*.py) выполняются внутри программы со всеми её правами.
+# Загружать и менять их из панели можно, только когда панель открыта на этом компьютере
+# (HOST=127.0.0.1). ALLOW_SCRIPTS=1 разрешает это и для панели, открытой из сети.
+ALLOW_SCRIPTS = _flag("ALLOW_SCRIPTS")
+
 # Как часто бот проверяет цену, секунд
 POLL_SECONDS = float(os.getenv("POLL_SECONDS", "15"))
 
