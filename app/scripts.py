@@ -41,6 +41,7 @@ import random
 import re
 import shutil
 import threading
+import time
 import traceback
 import types
 from pathlib import Path
@@ -268,7 +269,10 @@ def _pine():
     return pine
 
 
-def warmup_pine() -> None:
+def warmup_pine(delay: float = 0) -> None:
+    if os.environ.get("VALESBOT_NO_WARMUP") == "1":
+        return
+    time.sleep(delay)  # даём программе сначала спокойно запуститься и ответить панели
     try:
         _pine().warmup()
     except Exception:  # прогрев — не обязательная часть, ошибка в нём не должна мешать запуску

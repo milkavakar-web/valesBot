@@ -70,6 +70,8 @@ def main(argv=None) -> int:
     utf8_output()
     args = set(argv if argv is not None else sys.argv[1:])
     check = "--check" in args
+    if check:  # быстрая проверка запуска: фоновый прогрев парсера Pine только мешал бы ей
+        os.environ["VALESBOT_NO_WARMUP"] = "1"
     os.chdir(base_dir())
     if not Path(".env").exists() and template().exists():
         shutil.copyfile(template(), ".env")

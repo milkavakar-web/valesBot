@@ -46,7 +46,7 @@ async def lifespan(app: FastAPI):
     if scripts.has_pine():
         await asyncio.to_thread(scripts.all_scripts)
     else:
-        threading.Thread(target=scripts.warmup_pine, daemon=True).start()
+        threading.Thread(target=scripts.warmup_pine, args=(10,), daemon=True).start()
     await notifier.start()
     await manager.startup()
     running = sum(manager.is_running(b["id"]) for b in db.list_bots())
