@@ -457,14 +457,15 @@ pre.logs { white-space: pre-wrap; font-size: 13px; line-height: 1.55; margin: 0;
     <div class="drawer-head"><h2 id="sigTitle">Сигналы</h2><button type="button" class="link" data-close>Закрыть</button></div>
     <div class="drawer-body">
       <div id="sigListBox">
-        <p class="hint" style="margin-top:14px">Свой сигнал на входе — небольшой файл на Python с функцией <code>signal(candles, p)</code>. Бот вызывает её на закрытии каждой свечи, она отвечает «лонг», «шорт» или «ничего», а может задать и стоп с тейком. Сохранённый сигнал сразу появляется в редакторе бота («Когда входить» → «Сигнал-скрипт»); после правки работающие боты подхватят новый код на следующей свече — перезапускать ничего не нужно.</p>
+        <p class="hint" style="margin-top:14px">Свой сигнал на входе — Pine Script с TradingView как есть или небольшой файл на Python с функцией <code>signal(candles, p)</code>. Бот вызывает её на закрытии каждой свечи, она отвечает «лонг», «шорт» или «ничего», а может задать и стоп с тейком. Сохранённый сигнал сразу появляется в редакторе бота («Когда входить» → «Сигнал-скрипт»); после правки работающие боты подхватят новый код на следующей свече — перезапускать ничего не нужно.</p>
         <div class="sig-bar"><button type="button" class="btn primary" id="sigNew">Добавить сигнал</button></div>
         <p class="hint warn" id="sigLocked" hidden></p>
         <div id="sigList" style="margin-top:8px"></div>
       </div>
       <div id="sigEditBox" hidden>
         <h3 id="sigEditTitle" style="margin:18px 0 0">Новый сигнал</h3>
-        <p class="hint">Нужны <code>NAME</code> и <code>def signal(candles, p)</code>. <code>candles[-1]</code> — свеча, которая только что закрылась (<code>.open .high .low .close .volume .time</code>). Вернуть <code>None</code>, <code>"long"</code>, <code>"short"</code> или <code>{"side": "long", "stop": цена, "take": цена, "why": "текст"}</code>. Если сигнал считает индикаторы, удобнее <code>def signals(candles, p)</code>: один вызов на все свечи, вернуть список ответов по одному на свечу (ответ для свечи i — только по свечам 0..i; готовые индикаторы: <code>from app import indicators</code>). Настройки из <code>PARAMS</code> появятся в редакторе бота, комментарий после значения станет подписью. Свечи бот берёт с Binance сам: <code>ccxt</code>, циклы и <code>print</code> из готовых скриптов не нужны, <code>pandas</code> в программе нет.</p>
+        <p class="hint"><b>Pine Script с TradingView</b> вставляйте как есть — программа выполнит его сама: <code>input.*</code> станут настройками, <code>strategy.entry</code> — входом, <code>strategy.exit</code> — стопом и тейком, <code>strategy.close</code> — выходом; у индикатора сигналы берутся из <code>alertcondition</code> с Buy/Sell в названии. Рисование пропускается; данные другого таймфрейма, свои типы и трейлинг-стоп не поддерживаются — об этом скажет проверка.</p>
+        <p class="hint"><b>Python:</b> нужны <code>NAME</code> и <code>def signal(candles, p)</code>. <code>candles[-1]</code> — свеча, которая только что закрылась (<code>.open .high .low .close .volume .time</code>). Вернуть <code>None</code>, <code>"long"</code>, <code>"short"</code> или <code>{"side": "long", "stop": цена, "take": цена, "why": "текст"}</code>. Если сигнал считает индикаторы, удобнее <code>def signals(candles, p)</code>: один вызов на все свечи, вернуть список ответов по одному на свечу (ответ для свечи i — только по свечам 0..i; готовые индикаторы: <code>from app import indicators</code>). Настройки из <code>PARAMS</code> появятся в редакторе бота, комментарий после значения станет подписью. Свечи бот берёт с Binance сам: <code>ccxt</code>, циклы и <code>print</code> из готовых скриптов не нужны, <code>pandas</code> в программе нет.</p>
         <div class="sig-bar">
           <button type="button" class="btn" id="sigFileBtn">Загрузить файл .py</button>
           <input type="file" id="sigFile" accept=".py,text/x-python,text/plain" hidden>
@@ -1069,7 +1070,7 @@ async function openSignals() {
       <h3>${esc(x.name)}</h3>
       ${x.about ? `<p class="subtle">${esc(x.about)}</p>` : ""}
       ${x.error ? `<p class="err">${esc(x.error)}</p>` : ""}
-      <p class="subtle">Файл <code>data/signals/${esc(x.id)}.py</code>${Object.keys(x.params).length ? " · настройки: " + Object.entries(x.params).map(([k, v]) => `${esc(k)} ${num(v)}`).join(", ") : ""}${x.levels ? " · сам задаёт стоп и тейк" : ""} · ботов: ${x.bots}</p>
+      <p class="subtle">${x.pine ? "Pine Script · " : ""}Файл <code>data/signals/${esc(x.file || x.id + ".py")}</code>${Object.keys(x.params).length ? " · настройки: " + Object.entries(x.params).map(([k, v]) => `${esc(k)} ${num(v)}`).join(", ") : ""}${x.levels ? " · сам задаёт стоп и тейк" : ""} · ботов: ${x.bots}</p>
       <div class="sig-actions">
         <button type="button" class="link" data-sig-edit="${esc(x.id)}">${S.meta.scripts_editable ? "Изменить" : "Показать код"}</button>
         ${S.meta.scripts_editable ? `<button type="button" class="link danger" data-sig-del="${esc(x.id)}">Удалить</button>` : ""}
@@ -1122,7 +1123,7 @@ $("#sigSave").onclick = async () => {
     S.sigEditing = r.id;
     $("#sigEditTitle").textContent = `Сигнал: ${r.name}`;
     out.className = "sig-result pos";
-    out.textContent = `Сохранено в data/signals/${r.id}.py. ${r.test}.`;
+    out.textContent = `Сохранено в data/signals/${r.file}. ${r.test}.`;
     await reloadScripts();
     if ($("#editor").open) syncForm();
   } catch (err) { out.className = "sig-result neg"; out.textContent = err.message; }

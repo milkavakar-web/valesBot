@@ -20,6 +20,8 @@ high, low, close, volume; можно и candles[-1]["close"]). p — PARAMS с �
 Вернуть нужно None (сигнала нет), "long", "short" или словарь
 {"side": "long", "stop": цена, "take": цена, "why": "почему"}. stop и take необязательны:
 если они есть, позиция закрывается по ним, а не по процентам из настроек бота.
+Пока позиция открыта, сигнал может ей управлять — словарь без side: {"exit": True} закрывает
+позицию (или {"exit": "long"} — только лонг), {"stop": цена, "take": цена} переставляет уровни.
 Вход — по цене открытия следующей свечи, как и у сигналов из конструктора.
 
 Вместо signal можно написать signals(candles, p) — она вызывается один раз на все свечи и
@@ -47,6 +49,7 @@ from . import config
 
 EXAMPLES = Path(__file__).parent / "signals_examples"
 MAX_CODE = 100_000
+EXTS = (".py", ".pine")  # сигнал на Python или Pine Script с TradingView (выполняет app/pine.py)
 TIMEOUT = 30  # секунд на прогон скрипта по всем свечам
 
 TEMPLATE = '''"""Шаблон сигнала. Поменяйте NAME, PARAMS и тело signal — остальное можно не трогать."""
@@ -115,7 +118,7 @@ class Script:
         self.error: Optional[str] = None
         self.mod: Optional[types.ModuleType] = None
         try:
-            self.mod = _load(sid, self.code, str(path))
+            self.mod = _pine().load(self.code) if path.suffix == ".pine" else _load(sid, self.code, str(path))
         except ValueError as e:
             self.error = str(e)
 
@@ -138,13 +141,15 @@ class Script:
     @property
     def labels(self) -> Dict[str, str]:
         """Подписи настроек для панели — из комментариев в PARAMS: "range_pct": 0.5,  # размах, %"""
+        if getattr(self.mod, "LABELS", None):  # Pine: подписи из input.*(…, title)
+            return dict(self.mod.LABELS)
         found = re.findall(r"""^\s*["'](\w+)["']\s*:[^#\n]*#\s*(.+?)\s*$""", self.code, re.M)
         return {k: v for k, v in found if k in self.params}
 
     def info(self, with_code: bool = False) -> Dict[str, Any]:
         d = {"id": self.id, "name": self.name, "about": getattr(self.mod, "ABOUT", "") if self.mod else "",
              "params": self.params, "labels": self.labels, "warmup": self.warmup, "levels": self.levels,
-             "error": self.error}
+             "error": self.error, "file": self.path.name, "pine": self.path.suffix == ".pine"}
         if with_code:
             d["code"] = self.code
         return d
@@ -178,7 +183,7 @@ def all_scripts() -> List[Script]:
     """Все скрипты из папки; изменённые файлы перечитываются, удалённые пропадают."""
     with _lock:
         seen = set()
-        for path in sorted(folder().glob("*.py")):
+        for path in sorted(p for p in folder().iterdir() if p.suffix in EXTS):
             sid = path.stem
             seen.add(sid)
             mtime = path.stat().st_mtime
@@ -252,9 +257,28 @@ def slug(name: str) -> str:
     return (s or "signal")[:40]
 
 
-def check(code: str) -> types.ModuleType:
-    """Загружает код из панели и проверяет, что в нём всё на месте. Ошибки — ValueError."""
-    return _load("check", code.replace("\r\n", "\n"), "<проверка>")
+def _pine():
+    from . import pine  # разборщик Pine грузится, только когда он нужен
+    return pine
+
+
+def warmup_pine() -> None:
+    try:
+        _pine().warmup()
+    except Exception:  # прогрев — не обязательная часть, ошибка в нём не должна мешать запуску
+        pass
+
+
+def has_pine() -> bool:
+    return any(p.suffix == ".pine" for p in folder().iterdir())
+
+
+def check(code: str):
+    """Загружает код из панели (Python или Pine Script) и проверяет его. Ошибки — ValueError."""
+    code = code.replace("\r\n", "\n")
+    if _pine().is_pine(code):
+        return _pine().load(code)
+    return _load("check", code, "<проверка>")
 
 
 def save(code: str, sid: Optional[str] = None) -> Dict[str, Any]:
@@ -265,16 +289,21 @@ def save(code: str, sid: Optional[str] = None) -> Dict[str, Any]:
     if not re.fullmatch(r"[a-z0-9_]{1,40}", sid):
         raise ValueError("Имя файла — латиница, цифры и _")
     test = dry_run(mod)
-    path = folder() / f"{sid}.py"
+    ext = ".pine" if getattr(mod, "PINE", False) else ".py"
+    for other in EXTS:  # тот же сигнал мог раньше лежать на другом языке
+        if other != ext and (folder() / f"{sid}{other}").exists():
+            (folder() / f"{sid}{other}").unlink()
+    path = folder() / f"{sid}{ext}"
     path.write_text(code, encoding="utf-8")
     return {**next(s for s in all_scripts() if s.id == sid).info(), "test": test}
 
 
 def delete(sid: str) -> None:
-    path = folder() / f"{sid}.py"
-    if not path.exists():
+    paths = [folder() / f"{sid}{ext}" for ext in EXTS if (folder() / f"{sid}{ext}").exists()]
+    if not paths:
         raise ValueError("Такого сигнала нет")
-    path.unlink()
+    for path in paths:
+        path.unlink()
     all_scripts()
 
 
@@ -288,9 +317,15 @@ def dry_run(mod) -> str:
         h, l = max(o, price) * (1 + abs(rnd.gauss(0, 0.002))), min(o, price) * (1 - abs(rnd.gauss(0, 0.002)))
         rows.append([k * 60_000, o, h, l, price, rnd.uniform(1, 100)])
     params = dict(getattr(mod, "PARAMS", {}))
-    res = run(mod, rows, params, "<проверка>")
+    if hasattr(mod, "LENIENT"):  # Pine: таймфрейм в request.security проверится на свечах бота
+        mod.LENIENT = True
+    try:
+        res = run(mod, rows, params, "<проверка>")
+    finally:
+        if hasattr(mod, "LENIENT"):
+            mod.LENIENT = False
     n = sum(1 for r in res if r)
-    if callable(getattr(mod, "signals", None)):
+    if callable(getattr(mod, "signals", None)) and not getattr(mod, "CAUSAL", False):
         # signals видит все свечи сразу и может нечаянно заглянуть вперёд. Проверяем: ответ
         # для свечи i не должен меняться, если свечей после неё ещё нет — как вживую.
         hits = [i for i, r in enumerate(res) if r][:30]
@@ -306,13 +341,16 @@ def dry_run(mod) -> str:
 def _same(a: Optional[dict], b: Optional[dict]) -> bool:
     if not a or not b:
         return not a and not b
-    return a["side"] == b["side"] and all(
+    return a["side"] == b["side"] and a.get("exit") == b.get("exit") and all(
         (a.get(k) is None) == (b.get(k) is None) and (a.get(k) is None or math.isclose(a[k], b[k], rel_tol=1e-9))
         for k in ("stop", "take"))
 
 
 def _brief(r: Optional[dict]) -> str:
-    return "нет сигнала" if not r else r["side"] + "".join(f", {k} {r[k]:g}" for k in ("stop", "take") if k in r)
+    if not r:
+        return "нет сигнала"
+    head = r["side"] or ("выход" if r.get("exit") else "уровни")
+    return head + "".join(f", {k} {r[k]:g}" for k in ("stop", "take") if k in r)
 
 
 # ---------- прогон ----------
@@ -328,6 +366,8 @@ def run(mod, ohlcv: List[list], params: Dict[str, float], filename: Optional[str
             res = mod.signals(Candles(data, len(data)), params)
             res = list(res)
         except Exception as e:
+            if type(e).__name__ == "PineError":  # у Pine своё понятное сообщение с номером строки
+                raise ValueError(f"Pine Script, {e}")
             raise ValueError(f"Сигнал упал — {_where(e, filename)}")
         if len(res) != len(data):
             raise ValueError(f"signals вернула {len(res)} ответов на {len(data)} свечей — нужно по одному на свечу")
@@ -351,13 +391,20 @@ def run(mod, ohlcv: List[list], params: Dict[str, float], filename: Optional[str
     return out
 
 
-def _result(r: Any, close: float) -> dict:
+def _result(r: Any, close: float) -> Optional[dict]:
+    """Ответ сигнала в общем виде. Вход: side (+ stop, take). Без side — управление открытой
+    позицией: exit (закрыть: True, "long" или "short") и/или новые stop и take."""
     if isinstance(r, str):
         r = {"side": r}
-    if not isinstance(r, dict) or r.get("side") not in ("long", "short"):
-        raise ValueError(f"signal вернул {r!r}, а нужно None, \"long\", \"short\" или словарь с side")
-    long = r["side"] == "long"
-    res = {"side": r["side"], "why": str(r.get("why") or "")[:200]}
+    if not isinstance(r, dict) or r.get("side") not in (None, "long", "short") or \
+            r.get("exit") not in (None, False, True, "all", "long", "short"):
+        raise ValueError(f"signal вернул {r!r}, а нужно None, \"long\", \"short\" или словарь "
+                         f"с side (или с exit, stop, take для открытой позиции)")
+    side = r.get("side")
+    res: Dict[str, Any] = {"side": side, "why": str(r.get("why") or "")[:200]}
+    if r.get("exit"):
+        res["exit"] = True if r["exit"] in (True, "all") else r["exit"]
+    long = side == "long"
     for key in ("stop", "take"):
         v = r.get(key)
         if v is None:
@@ -366,12 +413,19 @@ def _result(r: Any, close: float) -> dict:
             v = float(v)
         except (TypeError, ValueError):
             raise ValueError(f"{key} должен быть ценой, а не {v!r}")
+        if v <= 0 or not math.isfinite(v):
+            raise ValueError(f"{key} должен быть положительной ценой, а не {v:g}")
+        if side is None:  # новый уровень для открытой позиции: сторону знает бот
+            res[key] = v
+            continue
         below = key == "stop" if long else key == "take"
-        if v <= 0 or (below and v >= close) or (not below and v <= close):
+        if (below and v >= close) or (not below and v <= close):
             side = "лонга" if long else "шорта"
             where = "ниже" if below else "выше"
             raise ValueError(f"{key} {v:g} для {side} должен быть {where} цены закрытия {close:g}")
         res[key] = v
+    if side is None and not res.get("exit") and "stop" not in res and "take" not in res:
+        return None
     return res
 
 

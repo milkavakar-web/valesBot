@@ -1,0 +1,99 @@
+//@version=5
+strategy("Liquidity Sweep Pine Test", overlay=true, initial_capital=1000, default_qty_type=strategy.percent_of_equity, default_qty_value=10, commission_value=0.1)
+
+// ── Inputs ──
+swingLen   = input.int(5, "Swing length", minval=1, group="Structure")
+emaLen     = input.int(200, "Trend EMA")
+atrLen     = input.int(14, "ATR length")
+atrMult    = input.float(1.5, "ATR stop multiplier", step=0.1)
+rr         = input.float(2.0, "Risk:Reward")
+useShorts  = input.bool(true, "Allow shorts")
+showLevels = input.bool(true, "Show levels")
+
+// ── Helpers ──
+bodyPct(o, c, h, l) =>
+    rng = h - l
+    rng > 0 ? math.abs(c - o) / rng * 100 : 0.0
+
+levels(isLong, entry, a) =>
+    stopPx = isLong ? entry - a * atrMult : entry + a * atrMult
+    takePx = isLong ? entry + (entry - stopPx) * rr : entry - (stopPx - entry) * rr
+    [stopPx, takePx]
+
+// ── Core ──
+ema = ta.ema(close, emaLen)
+atr = ta.atr(atrLen)
+ph = ta.pivothigh(high, swingLen, swingLen)
+pl = ta.pivotlow(low, swingLen, swingLen)
+
+var float lastLow = na
+var float lastHigh = na
+var swept = array.new_float(0)
+if not na(pl)
+    lastLow := pl
+if not na(ph)
+    lastHigh := ph
+
+bullSweep = not na(lastLow) and low < lastLow and close > lastLow and close > ema and bodyPct(open, close, high, low) > 30
+bearSweep = useShorts and not na(lastHigh) and high > lastHigh and close < lastHigh and close < ema
+
+if bullSweep and strategy.position_size == 0
+    [s, t] = levels(true, close, atr)
+    strategy.entry("Long", strategy.long, comment="sweep low")
+    strategy.exit("XL", "Long", stop=s, limit=t)
+    array.push(swept, lastLow)
+    lastLow := na
+
+if bearSweep and strategy.position_size == 0
+    [s, t] = levels(false, close, atr)
+    strategy.entry("Short", strategy.short)
+    strategy.exit("XS", "Short", stop=s, limit=t)
+    lastHigh := na
+
+plot(showLevels ? ema : na, "EMA", color=color.orange)
+plotshape(bullSweep, style=shape.triangleup, location=location.belowbar, color=color.green)
+if barstate.islast
+    label.new(bar_index, high, str.tostring(array.size(swept)) + " sweeps")
+bgcolor(strategy.position_size > 0 ? color.new(color.green, 90) : na)
+
+// ── дальше — другие частые конструкции, только для прогрева парсера ──
+f2(x, y) =>
+    r = x > y ? x - y : na
+    [r, x[1]]
+[a2, b2] = f2(close, ta.ema(close, 20))
+var int cnt = 0
+cnt += 1
+for i = 0 to 3 by 1
+    cnt := cnt + i
+float acc = 0.0
+for v in swept
+    acc += v
+s2 = switch
+    close > open => 1
+    close < open => -1
+    => 0
+t2 = switch syminfo.type
+    "crypto" => 1
+    => 0
+while cnt > 100
+    cnt -= 1
+    break
+r2 = ta.rsi(close, 14)
+[m2, sg2, h2] = ta.macd(close, 12, 26, 9)
+[bm, bu, bl] = ta.bb(close, 20, 2.0)
+k2 = ta.sma(ta.stoch(close, high, low, 14), 3)
+st2 = ta.supertrend(3.0, 10)
+longCond = ta.crossover(r2, 30) and close > ema
+shortCond = ta.crossunder(r2, 70) or (m2 < sg2 and h2 < h2[1])
+if longCond
+    strategy.entry("L2", strategy.long, qty=1, comment="rsi")
+else if shortCond and useShorts
+    strategy.entry("S2", strategy.short)
+if strategy.position_size > 0 and close < bl
+    strategy.close("L2", comment="bb")
+strategy.exit("TP", from_entry="L2", profit=200, loss=100)
+strategy.close_all(when=dayofweek == dayofweek.sunday)
+alertcondition(longCond, title="Buy", message="buy {{ticker}}")
+plotshape(shortCond, title="Sell", style=shape.labeldown, location=location.abovebar, color=color.red, text="S")
+plot(k2, color=k2 > 80 ? color.red : color.green, linewidth=2)
+fill(plot(bu), plot(bl), color=color.new(color.blue, 90))

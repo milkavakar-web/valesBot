@@ -369,6 +369,10 @@ def exit_reason(ind: Dict[str, list], i: int, p: Dict[str, Any], side: str) -> O
     conds = p["rules"][f"exit_{side}"]
     if rules.check_set(ind, conds, i):
         return "условие выхода: " + rules.explain(ind, conds, i)
+    if p["signal"] == "script":
+        r = ind[SCRIPT_KEY][i]
+        if r and r.get("exit") in (True, side):
+            return "сигнал на выход" + (f": {r['why']}" if r.get("why") else "")
     return None
 
 
@@ -385,9 +389,17 @@ def describe_signal(ind: Dict[str, list], i: int, p: Dict[str, Any], sig: str) -
 
 def signal_levels(ind: Dict[str, list], i: int, p: Dict[str, Any]) -> Dict[str, float]:
     """Стоп и тейк, которые сигнал-скрипт задал для сделки по свече i (цены)."""
-    if p["signal"] != "script" or not ind[SCRIPT_KEY][i]:
+    r = ind[SCRIPT_KEY][i] if p["signal"] == "script" else None
+    if not r or not r["side"]:
         return {}
-    r = ind[SCRIPT_KEY][i]
+    return {k: r[k] for k in ("stop", "take") if k in r}
+
+
+def signal_updates(ind: Dict[str, list], i: int, p: Dict[str, Any]) -> Dict[str, float]:
+    """Новые стоп и тейк для открытой позиции от сигнала-скрипта (ответ без side)."""
+    r = ind[SCRIPT_KEY][i] if p["signal"] == "script" else None
+    if not r or r["side"]:
+        return {}
     return {k: r[k] for k in ("stop", "take") if k in r}
 
 

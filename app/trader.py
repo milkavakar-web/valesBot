@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 from .strategy import (describe_signal, exit_reason, indicator_snapshot, signal_at,
-                       signal_levels, so_deviation_pct)
+                       signal_levels, signal_updates, so_deviation_pct)
 
 
 @dataclass
@@ -127,6 +127,14 @@ class Trader:
                 pos = None
                 if sig == side:  # условия входа и выхода совпали — не заходим снова на той же свече
                     return
+            else:
+                upd = signal_updates(ind, i, self.p)  # сигнал-скрипт переставил стоп или тейк
+                if upd.get("stop"):
+                    pos["sl_price"] = upd["stop"]
+                if upd.get("take"):
+                    pos["tp_price"] = upd["take"]
+                if upd:
+                    self.persist()
         if not pos and sig and self._allowed(sig):
             await self.open(sig, price, ts, why, signal_levels(ind, i, self.p))
 

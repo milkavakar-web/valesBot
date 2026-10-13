@@ -8,11 +8,13 @@ a = Analysis(
     ["app/launcher.py"],
     pathex=["."],
     datas=[("app/static", "app/static"), ("app/signals_examples", "app/signals_examples"),
-           (".env.example", ".")],
+           ("app/pine_warmup.pine", "app"), (".env.example", ".")],
     # uvicorn подгружает цикл событий и протоколы по имени — явно включаем их в сборку.
     # Модули стандартной библиотеки — для сигналов-скриптов: сама программа их не импортирует,
     # и без этого их не было бы в exe.
-    hiddenimports=collect_submodules("uvicorn") + ["app.main"] + [
+    # pynescript (разбор Pine Script) и его ANTLR — тоже: app.pine подгружает их только по требованию.
+    hiddenimports=collect_submodules("uvicorn") + collect_submodules("pynescript")
+    + collect_submodules("antlr4") + ["app.main", "app.pine"] + [
         "statistics", "datetime", "decimal", "fractions", "bisect", "heapq", "collections",
         "itertools", "functools", "math", "random", "json", "re", "zoneinfo"],
     excludes=["tkinter"],

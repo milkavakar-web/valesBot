@@ -1,6 +1,7 @@
 """Веб-панель и API."""
 import asyncio
 import logging
+import threading
 import secrets
 import time
 from contextlib import asynccontextmanager
@@ -40,6 +41,12 @@ def auth(creds: Optional[HTTPBasicCredentials] = Depends(security)) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init()
+    # Первый разбор Pine Script после запуска долгий (~10–15 с). Есть Pine-сигналы — разбираем
+    # их до старта ботов; нет — прогреваем парсер в фоне, чтобы вставленный код сохранялся быстро.
+    if scripts.has_pine():
+        await asyncio.to_thread(scripts.all_scripts)
+    else:
+        threading.Thread(target=scripts.warmup_pine, daemon=True).start()
     await notifier.start()
     await manager.startup()
     running = sum(manager.is_running(b["id"]) for b in db.list_bots())
@@ -211,12 +218,14 @@ async def save_script(data: Dict[str, Any]):
     code, sid = data.get("code"), data.get("id") or None
     if not isinstance(code, str) or not code.strip():
         raise ValueError("Вставьте код сигнала")
-    if sid is None:
-        mod_name = scripts.slug(scripts.check(code).NAME)
-        if any(s.id == mod_name for s in scripts.all_scripts()):
-            raise ValueError("Сигнал с таким названием уже есть: поменяйте NAME или откройте "
-                             "тот сигнал и правьте его")
-    return await asyncio.to_thread(scripts.save, code, sid)
+    def work():  # разбор (особенно Pine) бывает долгим — не держим остальную программу
+        if sid is None:
+            new_id = scripts.slug(scripts.check(code).NAME)
+            if any(s.id == new_id for s in scripts.all_scripts()):
+                raise ValueError("Сигнал с таким названием уже есть: поменяйте название или откройте "
+                                 "тот сигнал и правьте его")
+        return scripts.save(code, sid)
+    return await asyncio.to_thread(work)
 
 
 @app.delete("/api/scripts/{sid}")

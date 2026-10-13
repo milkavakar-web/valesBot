@@ -137,6 +137,36 @@ def signal(candles, p):
   0..i: при сохранении программа сравнивает ответы с обрезанной историей и не пустит сигнал,
   который заглядывает в будущее.
 
+### Pine Script с TradingView
+
+Код стратегии или индикатора с TradingView («Source code» на странице скрипта) можно вставить
+в «Сигналы» как есть — переводить на Python не нужно. Программа выполняет его сама, свеча за
+свечой, как TradingView, и хранит в `data/signals/<имя>.pine`.
+
+- `input.int` / `input.float` / `input.bool` становятся настройками сигнала в редакторе бота,
+  с подписями из `title`.
+- **Стратегия** (`strategy(...)`): `strategy.entry` — вход, `strategy.exit` со `stop`/`limit`
+  (или `loss`/`profit` в тиках) — стоп и тейк, которые бот переставляет каждую свечу, как
+  TradingView, `strategy.close` / `close_all` — выход. `strategy.position_size` и
+  `position_avg_price` работают: скрипт ведёт свою позицию так же, как в TradingView, и входы
+  бота совпадают с ней свеча в свечу.
+- **Индикатор** (`indicator(...)`): сигналы берутся из `alertcondition` — в названии или тексте
+  «Buy/Long» — лонг, «Sell/Short» — шорт. Выход — по тейку и стопу из настроек бота.
+- Поддержано: ряды и история `x[1]`, `var`, свои функции, кортежи `[a, b]`, `if`/`switch`/
+  циклы, массивы, `ta.*` (sma, ema, rma, wma, hma, vwma, rsi, atr, tr, stdev, highest, lowest,
+  crossover, crossunder, change, mom, roc, macd, bb, stoch, cci, vwap, pivothigh, pivotlow,
+  valuewhen, barssince, dmi, supertrend, linreg, …), `math.*`, время, `nz`/`na`.
+- Рисование (`plot`, `label`, `line`, `box`, `table`, цвета) пропускается.
+- Не поддерживается, и проверка при сохранении скажет об этом с номером строки:
+  `request.security` на другой таймфрейм или символ, `request.security_lower_tf` и прочие
+  `request.*`, свои типы (`type`, `enum`), `map`, `matrix`, библиотеки (`import`), отложенные
+  входы (`strategy.entry` с `limit`/`stop`) и трейлинг-стоп.
+
+Первый разбор Pine после запуска программы занимает 10–20 секунд (парсер строит свои таблицы),
+поэтому программа прогревает его в фоне при старте; если Pine-сигналы уже есть — до запуска
+ботов. Разбор — библиотека [pynescript](https://github.com/elbakramer/pynescript) (LGPL-3.0),
+выполнение — `app/pine.py`.
+
 Примеры появляются в `data/signals/` сами (каждый один раз — удалённый не вернётся):
 
 | Сигнал | Идея | Таймфрейм |
