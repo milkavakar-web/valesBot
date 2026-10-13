@@ -9,7 +9,7 @@ import asyncio
 from collections import OrderedDict
 from typing import Any, Dict, List, Optional
 
-from .brokers import PaperBroker, exchange_symbol, hub
+from .brokers import PaperBroker, exchange_symbol, fetch_candles, hub
 from . import rules
 from .strategy import TF_MS, active_sets, entry_condition, max_margin, prepare
 from .trader import Trader
@@ -38,7 +38,7 @@ async def fetch_history(market: str, symbol: str, timeframe: str,
     out: Dict[int, list] = {}
     cursor = since
     while cursor < until:
-        batch = await ex.fetch_ohlcv(sym, timeframe, since=cursor, limit=1000)
+        batch = await fetch_candles(ex, market, symbol, timeframe, since=cursor, limit=1000)
         if not batch:
             break
         for c in batch:

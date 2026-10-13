@@ -16,7 +16,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from . import config, db, rules, scripts
 from .backtest import MAX_CANDLES, chart_data, fetch_history, run_backtest
-from .brokers import exchange_symbol, hub
+from .brokers import exchange_symbol, fetch_candles, hub
 from .engine import manager
 from .notify import notifier
 from .strategy import (DEFAULT_PARAMS, PRESETS, TF_MS, TIMEFRAMES, TUNED_BOTS, max_margin,
@@ -102,6 +102,13 @@ async def value_error(_: Request, e: ValueError):
 @app.exception_handler(RuntimeError)
 async def runtime_error(_: Request, e: RuntimeError):
     return JSONResponse({"detail": str(e)}, status_code=400)
+
+
+@app.exception_handler(OSError)
+async def os_error(_: Request, e: OSError):
+    # диск: нет прав, нет места, слишком длинный путь — показываем причину, а не голую «500»
+    return JSONResponse({"detail": f"Не удалось прочитать или записать файл: {e.strerror or e} "
+                                   f"({getattr(e, 'filename', '') or ''})"}, status_code=500)
 
 
 @app.exception_handler(ccxt.BaseError)
@@ -373,7 +380,7 @@ async def bot_chart(bot_id: int):
     sym = exchange_symbol(bot["market"], bot["symbol"])
     if sym not in ex.markets:
         raise ValueError(f"Пары {bot['symbol']} нет на Binance")
-    ohlcv = await ex.fetch_ohlcv(sym, bot["timeframe"], limit=1000)
+    ohlcv = await fetch_candles(ex, bot["market"], bot["symbol"], bot["timeframe"], limit=1000)
     if len(ohlcv) < 2:
         raise RuntimeError("Биржа вернула слишком мало свечей")
     start = max(0, min(warmup_candles(p), len(ohlcv) - 300))

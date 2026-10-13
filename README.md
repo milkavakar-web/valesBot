@@ -116,7 +116,8 @@ def signal(candles, p):
     return None
 ```
 
-- `candles` — закрытые свечи, у каждой `time`, `open`, `high`, `low`, `close`, `volume`.
+- `candles` — закрытые свечи, у каждой `time`, `open`, `high`, `low`, `close`, `volume` и
+  `buy_volume` — объём рыночных покупок (продажи — `volume − buy_volume`).
   Свечи бот берёт с Binance сам, поэтому `ccxt`, циклы и `print` из готовых скриптов-сканеров
   не нужны. `pandas` и `numpy` в программе нет, стандартный Python — есть.
 - Ответ: `None`, `"long"`, `"short"` или словарь со `side` и, по желанию, `stop` и `take` —
@@ -156,10 +157,16 @@ def signal(candles, p):
   циклы, массивы, `ta.*` (sma, ema, rma, wma, hma, vwma, rsi, atr, tr, stdev, highest, lowest,
   crossover, crossunder, change, mom, roc, macd, bb, stoch, cci, vwap, pivothigh, pivotlow,
   valuewhen, barssince, dmi, supertrend, linreg, …), `math.*`, время, `nz`/`na`.
+- `request.security_lower_tf` (свечи меньшего таймфрейма) обычно нужен, чтобы посчитать дельту
+  объёма: объём «зелёных» минуток минус «красных». Минуток в боте нет, зато Binance в каждой
+  свече отдаёт настоящий объём рыночных покупок (taker buy). Внутри свечи бот отдаёт две
+  «свечи» — растущую с объёмом покупок и падающую с объёмом продаж, так что та же формула
+  даёт настоящую дельту, а не её приближение. Поля — только `open`/`high`/`low`/`close`/`volume`.
+- `time(таймфрейм, сессия, часовой пояс)` — фильтр сессии вроде `"0930-1200"` по
+  `"America/New_York"`; `time("D")`, `time("W")` — начало дня и недели (UTC, как у Binance).
 - Рисование (`plot`, `label`, `line`, `box`, `table`, цвета) пропускается.
 - Не поддерживается, и проверка при сохранении скажет об этом с номером строки:
-  `request.security` на другой таймфрейм или символ, `request.security_lower_tf` и прочие
-  `request.*`, свои типы (`type`, `enum`), `map`, `matrix`, библиотеки (`import`), отложенные
+  `request.security` на другой таймфрейм или символ, прочие `request.*`, свои типы (`type`, `enum`), `map`, `matrix`, библиотеки (`import`), отложенные
   входы (`strategy.entry` с `limit`/`stop`) и трейлинг-стоп.
 
 Первый разбор Pine после запуска программы занимает 10–20 секунд (парсер строит свои таблицы),

@@ -7,7 +7,7 @@ from collections import deque
 from typing import Any, Deque, Dict, Optional, Tuple
 
 from . import config, db
-from .brokers import ExchangeBroker, PaperBroker, exchange_symbol, hub
+from .brokers import ExchangeBroker, PaperBroker, exchange_symbol, fetch_candles, hub
 from .notify import alert_message, info_message, notifier, trade_message, wanted
 from .strategy import prepare, warmup_candles
 from .trader import OrderStatusUnknown, Trader
@@ -177,7 +177,7 @@ class Manager:
         tf_ms = ex.parse_timeframe(bot["timeframe"]) * 1000
         # свечей берём с запасом на «разогрев» индикатора — так сигналы совпадают с бэктестом
         limit = min(1000, max(500, warmup_candles(trader.p) + 2))
-        ohlcv = await ex.fetch_ohlcv(sym, bot["timeframe"], limit=limit)
+        ohlcv = await fetch_candles(ex, bot["market"], bot["symbol"], bot["timeframe"], limit=limit)
         if len(ohlcv) < 3:
             raise RuntimeError("Биржа вернула слишком мало свечей")
         now = now_ms()

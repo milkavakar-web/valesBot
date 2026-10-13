@@ -3,3 +3,4 @@ fastapi>=0.115
 uvicorn>=0.30
 python-dotenv>=1.0
 pynescript>=0.3,<0.4
+tzdata>=2024.1

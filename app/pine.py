@@ -12,6 +12,12 @@
 - indicator(...) — alertcondition: условие с «buy/long/покупка» в названии — лонг,
   с «sell/short/продажа» — шорт. Выход тогда — по тейку и стопу из настроек бота.
 - input.int / float / bool — настройки сигнала в редакторе бота.
+- request.security_lower_tf (свечи меньшего таймфрейма внутри свечи) — обычно им считают
+  дельту объёма: объём «зелёных» минуток минус «красных». Минуток в боте нет, зато у Binance
+  в каждой свече есть настоящий объём рыночных покупок. Поэтому внутри свечи бот отдаёт две
+  «свечи»: растущую с объёмом покупок и падающую с объёмом продаж — та же формула даёт
+  настоящую дельту, а не её приближение.
+- time(таймфрейм, сессия, часовой пояс) — фильтр торговой сессии, time("D") — начало дня.
 
 Чего нет: рисование (plot, label, line, box, table — пропускается), данные другого таймфрейма
 и символа (request.security на другой таймфрейм), свои типы, map, matrix, библиотеки,
@@ -131,7 +137,7 @@ class Compiled:
                 self.kind = "strategy" if fn == "strategy" else "indicator"
                 t = _arg(node, 0, "title")
                 self.title = _literal(t) if t is not None else None
-            elif fn.startswith("request.") and fn != "request.security":
+            elif fn.startswith("request.") and fn not in ("request.security", "request.security_lower_tf"):
                 problems.append(_err(node, f"{fn} не поддерживается: в боте есть только свечи этой пары и таймфрейма"))
             elif fn.split(".")[0] in ("map", "matrix"):
                 problems.append(_err(node, f"{fn.split('.')[0]} не поддерживается"))
@@ -720,6 +726,64 @@ def _timestamp(rt, *a):
 BUILTINS["timestamp"] = (_timestamp, ["year", "month", "day", "hour", "minute", "second"], False)
 
 
+def _tf_start(t: int, tf: str, base_ms: int) -> Tuple[int, int]:
+    """Начало и длина свечи таймфрейма tf («60», «240», «D», «W», «M»), в которой лежит время t (UTC)."""
+    tf = str(tf).upper()
+    if tf in ("", "0"):
+        return t, base_ms
+    if tf in ("D", "1D"):
+        return t // 86_400_000 * 86_400_000, 86_400_000
+    if tf in ("W", "1W"):
+        monday = (t // 86_400_000 - 4) // 7 * 7 + 4  # 1 января 1970 — четверг
+        return monday * 86_400_000, 7 * 86_400_000
+    if tf in ("M", "1M"):
+        d = datetime.fromtimestamp(t / 1000, tz=timezone.utc)
+        start = datetime(d.year, d.month, 1, tzinfo=timezone.utc)
+        nxt = datetime(d.year + d.month // 12, d.month % 12 + 1, 1, tzinfo=timezone.utc)
+        return int(start.timestamp() * 1000), int((nxt - start).total_seconds() * 1000)
+    m = re.fullmatch(r"(\d+)([SH]?)", tf)
+    if not m:
+        return t, base_ms
+    ms = int(m.group(1)) * (1000 if m.group(2) == "S" else 3_600_000 if m.group(2) == "H" else 60_000)
+    return t // ms * ms, ms
+
+
+def _tzinfo(name):
+    if not name:
+        return timezone.utc
+    m = re.fullmatch(r"(?:GMT|UTC)\s*([+-])\s*(\d{1,2})(?::?(\d{2}))?", str(name).strip(), re.I)
+    if m:
+        from datetime import timedelta
+        delta = timedelta(hours=int(m.group(2)), minutes=int(m.group(3) or 0))
+        return timezone(delta if m.group(1) == "+" else -delta)
+    if str(name).upper() in ("UTC", "GMT", "ETC/UTC"):
+        return timezone.utc
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo(str(name))
+    except Exception:
+        raise PineError(f"неизвестный часовой пояс «{name}»")
+
+
+def _in_session(t: int, session: str, tz_name) -> bool:
+    """Попадает ли начало свечи в сессию вида «0930-1200», «0930-1600:23456», «2200-0200»
+    (через ночь), «0000-0000» — круглые сутки. Дни: 1 — воскресенье … 7 — суббота."""
+    local = datetime.fromtimestamp(t / 1000, tz=_tzinfo(tz_name))
+    hm = local.hour * 100 + local.minute
+    dow = (local.weekday() + 1) % 7 + 1
+    spec, _, days = session.partition(":")
+    if days and str(dow) not in days:
+        return False
+    for part in spec.split(","):
+        m = re.fullmatch(r"\s*(\d{4})-(\d{4})\s*", part)
+        if not m:
+            continue
+        a, b = int(m.group(1)), int(m.group(2))
+        if a == b or (a < b and a <= hm < b) or (a > b and (hm >= a or hm < b)):
+            return True
+    return False
+
+
 def _array(name):
     def f(rt, *a):
         arr = a[0] if a else None
@@ -795,6 +859,7 @@ class Runtime:
         self.c = [c.close for c in candles]
         self.v = [c.volume for c in candles]
         self.t = [c.time for c in candles]
+        self.bv = [getattr(c, "buy_volume", None) for c in candles]  # объём рыночных покупок
         self.n = len(candles)
         diffs = [b - a for a, b in zip(self.t[:20], self.t[1:21]) if b > a]
         self.tf_ms = min(diffs) if diffs else 60_000
@@ -814,6 +879,7 @@ class Runtime:
         self.trades = 0
         self.pending: Optional[dict] = None
         self.exits: Dict[str, dict] = {}
+        self.log: List[dict] = []  # сделки самого скрипта — для сверки с отчётом TradingView
         self.dispatch = {P.Name: self.ev_name, P.Constant: lambda n, fk: n.value, P.BinOp: self.ev_binop,
                          P.UnaryOp: self.ev_unary, P.BoolOp: self.ev_boolop, P.Compare: self.ev_compare,
                          P.Conditional: self.ev_cond, P.Call: self.ev_call, P.Attribute: self.ev_attr,
@@ -866,7 +932,14 @@ class Runtime:
                 res["take"] = take
         return res
 
-    def _flat(self):
+    # Путь цены внутри свечи для стопа и тейка: "color" — как в бэктесте бота (растущая свеча
+    # open → low → high → close, падающая — наоборот); "tv" — как в TradingView без Bar Magnifier
+    # (сначала к тому экстремуму, который ближе к открытию).
+    PATH = "color"
+
+    def _flat(self, i: Optional[int] = None, price: Optional[float] = None, reason: str = ""):
+        if self.log and "exit_ts" not in self.log[-1] and i is not None:
+            self.log[-1].update(exit_ts=self.t[i], exit_px=price, reason=reason)
         self.pos, self.avg, self.entry_id = 0, None, None
         self.exits = {k: e for k, e in self.exits.items() if e["from"] in ("", None)}
 
@@ -875,23 +948,31 @@ class Runtime:
         p, self.pending = self.pending, None
         if p:
             if p.get("close") and self.pos:
-                self._flat()
+                self._flat(i, self.o[i], "close")
             if p.get("entry"):
                 eid, side = p["entry"]
                 s = 1 if side == "long" else -1
                 if self.pos != s:
+                    if self.pos:
+                        self._flat(i, self.o[i], "reverse")
                     self.pos, self.avg, self.entry_id = s, self.o[i], eid
                     self.trades += 1
+                    self.log.append({"side": side, "id": eid, "entry_ts": self.t[i], "entry_px": self.o[i]})
         if not self.pos:
             return
         lv = self._levels(self.avg, self.pos)
         o, h, l, c = self.o[i], self.h[i], self.l[i], self.c[i]
-        path = (o, l, h, c) if c >= o else (o, h, l, c)
-        for px in path:
+        if self.PATH == "tv":
+            path = (o, h, l, c) if abs(h - o) < abs(o - l) else (o, l, h, c)
+        else:
+            path = (o, l, h, c) if c >= o else (o, h, l, c)
+        for n, px in enumerate(path):
             st, tk = lv.get("stop"), lv.get("take")
-            if (st is not None and (px <= st if self.pos > 0 else px >= st)) or \
-                    (tk is not None and (px >= tk if self.pos > 0 else px <= tk)):
-                self._flat()
+            hit_st = st is not None and (px <= st if self.pos > 0 else px >= st)
+            hit_tk = tk is not None and (px >= tk if self.pos > 0 else px <= tk)
+            if hit_st or hit_tk:
+                level = st if hit_st else tk
+                self._flat(i, px if n == 0 else level, "stop" if hit_st else "take")  # гэп на открытии — по open
                 return
 
     def _result(self, i: int) -> Optional[dict]:
@@ -1239,6 +1320,10 @@ class Runtime:
             return self.input_value(node, fk)
         if fn == "request.security":
             return self.security(node, fk)
+        if fn == "request.security_lower_tf":
+            return self.security_lower_tf(node, fk)
+        if fn in ("time", "time_close"):
+            return self.time_fn(fn, node, fk)
         if fn == "alertcondition":
             return self.alertcondition(node, fk)
         if fn.startswith("strategy."):
@@ -1304,6 +1389,47 @@ class Runtime:
         if info["kind"] == "source" and info["default_node"] is not None:
             return self.ev(info["default_node"], fk)
         return info["default"]
+
+    LTF_FIELDS = ("open", "high", "low", "close", "volume", "hl2", "hlc3", "ohlc4")
+
+    def security_lower_tf(self, node, fk):
+        """Две «свечи» внутри свечи: растущая с объёмом рыночных покупок и падающая с объёмом
+        продаж (данные Binance). Сумма объёмов растущих минус падающих — настоящая дельта."""
+        expr = _arg(node, 2, "expression")
+        names = [e for e in (expr.elts if isinstance(expr, P.Tuple) else [expr])]
+        if not all(isinstance(e, P.Name) and e.id in self.LTF_FIELDS for e in names):
+            raise _err(node, "request.security_lower_tf поддерживается только для open, high, low, close и volume: "
+                             "вместо свечей меньшего таймфрейма бот отдаёт объём покупок и продаж внутри свечи")
+        i = self.i
+        o, h, l, c, v = self.o[i], self.h[i], self.l[i], self.c[i], self.v[i]
+        b = self.bv[i]
+        if b is None:
+            if not self.lenient:
+                raise _err(node, "для request.security_lower_tf нужен объём рыночных покупок, а биржа его не отдала")
+            b = v if c >= o else 0.0  # пробный прогон на случайных свечах
+        sell = max(v - b, 0.0)
+        down_close = l if l < h else h - self.mintick
+        up = {"open": l, "high": h, "low": l, "close": h, "volume": b}
+        dn = {"open": h, "high": h, "low": l, "close": down_close, "volume": sell}
+        for d in (up, dn):
+            d["hl2"] = (d["high"] + d["low"]) / 2
+            d["hlc3"] = (d["high"] + d["low"] + d["close"]) / 3
+            d["ohlc4"] = (d["open"] + d["high"] + d["low"] + d["close"]) / 4
+        cols = [[up[e.id], dn[e.id]] for e in names]
+        return cols if isinstance(expr, P.Tuple) else cols[0]
+
+    def time_fn(self, fn, node, fk):
+        """time(таймфрейм, сессия, часовой пояс): начало свечи этого таймфрейма; с сессией —
+        na, если свеча вне сессии. time_close — то же для конца свечи."""
+        tf = self.ev(_arg(node, 0, "timeframe"), fk) if _arg(node, 0, "timeframe") is not None else ""
+        sess_node, tz_node = _arg(node, 1, "session"), _arg(node, 2, "timezone")
+        session = self.ev(sess_node, fk) if sess_node is not None else None
+        tz = self.ev(tz_node, fk) if tz_node is not None else None
+        t = self.t[self.i]
+        start, length = _tf_start(t, tf or self.tf, self.tf_ms)
+        if session and not _in_session(t, str(session), tz):
+            return None
+        return start + length if fn == "time_close" else start
 
     def security(self, node, fk):
         tf_node, expr = _arg(node, 1, "timeframe"), _arg(node, 2, "expression")

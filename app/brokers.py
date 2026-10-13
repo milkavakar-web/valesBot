@@ -1,7 +1,7 @@
 """Исполнение ордеров: бумажная торговля и Binance (демо или реальный счёт) через ccxt."""
 import asyncio
 import logging
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import ccxt.async_support as ccxt
 
@@ -25,6 +25,25 @@ def exchange_symbol(market: str, symbol: str) -> str:
         quote = symbol.split("/")[1]
         return f"{symbol}:{quote}"
     return symbol
+
+
+async def fetch_candles(ex, market: str, symbol: str, timeframe: str,
+                        since: Optional[int] = None, limit: int = 500) -> List[list]:
+    """Свечи [время, open, high, low, close, объём, объём рыночных покупок].
+
+    Берём «сырые» свечи Binance, а не fetch_ohlcv из ccxt: только в них есть объём, который
+    купили по рынку (taker buy). Покупки минус продажи — это дельта объёма, на ней строятся
+    сигналы вроде Delta Absorption. Если сырые свечи недоступны — обычные, без этого столбца."""
+    params = {"symbol": ex.market(exchange_symbol(market, symbol))["id"], "interval": timeframe,
+              "limit": min(limit, 1000)}
+    if since is not None:
+        params["startTime"] = since
+    try:
+        raw = await (ex.publicGetKlines if market == "spot" else ex.fapiPublicGetKlines)(params)
+        return [[int(r[0]), float(r[1]), float(r[2]), float(r[3]), float(r[4]), float(r[5]), float(r[9])]
+                for r in raw]
+    except (AttributeError, IndexError, KeyError, TypeError, ValueError):
+        return await ex.fetch_ohlcv(exchange_symbol(market, symbol), timeframe, since=since, limit=limit)
 
 
 class ExchangeHub:

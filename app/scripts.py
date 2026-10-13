@@ -36,6 +36,7 @@ high, low, close, volume; можно и candles[-1]["close"]). p — PARAMS с �
 """
 import keyword
 import math
+import os
 import random
 import re
 import shutil
@@ -49,6 +50,7 @@ from . import config
 
 EXAMPLES = Path(__file__).parent / "signals_examples"
 MAX_CODE = 100_000
+LONG_PREFIX = "\\\\?\\"  # \\?\ — длинные пути Windows
 EXTS = (".py", ".pine")  # сигнал на Python или Pine Script с TradingView (выполняет app/pine.py)
 TIMEOUT = 30  # секунд на прогон скрипта по всем свечам
 
@@ -84,6 +86,7 @@ class Candle(NamedTuple):
     low: float
     close: float
     volume: float
+    buy_volume: Optional[float] = None  # объём рыночных покупок (taker buy); продажи — volume − buy_volume
 
     def __getitem__(self, key):  # candle["close"] — как в pandas, candle[4] — как в ccxt
         return getattr(self, key) if isinstance(key, str) else tuple.__getitem__(self, key)
@@ -160,6 +163,9 @@ def folder() -> Path:
     записано, какие уже предлагались, так что удалённый пример не вернётся, а новый
     из обновлённой версии программы появится."""
     d = Path(config.DB_PATH).parent / "signals"
+    if os.name == "nt" and not str(d).startswith(LONG_PREFIX):
+        # Windows: путь длиннее 260 символов (глубокая папка + длинное имя сигнала) иначе не открыть
+        d = Path(LONG_PREFIX + str(d.resolve()))
     d.mkdir(parents=True, exist_ok=True)
     seen_file = d / ".examples"
     try:
@@ -358,7 +364,8 @@ def _brief(r: Optional[dict]) -> str:
 def run(mod, ohlcv: List[list], params: Dict[str, float], filename: Optional[str] = None) -> List[Optional[dict]]:
     """Сигнал на каждой свече: None или {"side", "stop", "take", "why"}. Ошибки — ValueError."""
     filename = filename or getattr(mod, "__file__", "")
-    data = [Candle(int(c[0]), float(c[1]), float(c[2]), float(c[3]), float(c[4]), float(c[5])) for c in ohlcv]
+    data = [Candle(int(c[0]), float(c[1]), float(c[2]), float(c[3]), float(c[4]), float(c[5]),
+                   float(c[6]) if len(c) > 6 and c[6] is not None else None) for c in ohlcv]
     warm = int(getattr(mod, "WARMUP", 50))
     out: List[Optional[dict]] = [None] * len(data)
     if callable(getattr(mod, "signals", None)):  # весь ряд за один вызов
