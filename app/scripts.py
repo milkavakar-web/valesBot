@@ -22,6 +22,12 @@ high, low, close, volume; можно и candles[-1]["close"]). p — PARAMS с �
 если они есть, позиция закрывается по ним, а не по процентам из настроек бота.
 Вход — по цене открытия следующей свечи, как и у сигналов из конструктора.
 
+Вместо signal можно написать signals(candles, p) — она вызывается один раз на все свечи и
+возвращает список такой же длины: в элементе i — ответ для свечи i. Так удобнее и в сотни
+раз быстрее для индикаторов вроде EMA или ADX: ряд считается один раз, а не на каждой свече.
+Элемент i должен зависеть только от свечей 0..i — иначе проверка на истории «подсмотрит»
+будущее и покажет то, чего вживую не будет. Готовые индикаторы: from app import indicators.
+
 Скрипт выполняется внутри программы со всеми её правами — добавляйте только свой код
 или тот, который прочитали. Поэтому загрузка из панели работает, только когда панель
 открыта на этом компьютере (HOST=127.0.0.1), или если явно разрешить ALLOW_SCRIPTS=1.
@@ -145,12 +151,22 @@ class Script:
 
 
 def folder() -> Path:
-    """data/signals рядом с базой. При первом запуске туда кладутся примеры."""
+    """data/signals рядом с базой. Туда кладутся примеры — каждый один раз: в .examples
+    записано, какие уже предлагались, так что удалённый пример не вернётся, а новый
+    из обновлённой версии программы появится."""
     d = Path(config.DB_PATH).parent / "signals"
-    if not d.exists():
-        d.mkdir(parents=True)
-        for f in EXAMPLES.glob("*.py"):
+    d.mkdir(parents=True, exist_ok=True)
+    seen_file = d / ".examples"
+    try:
+        seen = set(seen_file.read_text(encoding="utf-8").split())
+    except OSError:  # папка от версии без .examples: примеры, что там уже лежат, — предложены
+        seen = {f.name for f in d.glob("*.py")}
+    new = [f for f in sorted(EXAMPLES.glob("*.py")) if f.name not in seen]
+    for f in new:
+        if not (d / f.name).exists():
             shutil.copyfile(f, d / f.name)
+    if new or not seen_file.exists():
+        seen_file.write_text("\n".join(sorted(seen | {f.name for f in new})) + "\n", encoding="utf-8")
     return d
 
 
@@ -203,8 +219,8 @@ def _load(sid: str, code: str, filename: str) -> types.ModuleType:
                          f"pandas и numpy не входят — работайте со списком свечей")
     except Exception as e:
         raise ValueError(f"Файл не выполнился: {_where(e, filename)}")
-    if not callable(getattr(mod, "signal", None)):
-        raise ValueError("В файле нет функции signal(candles, p)")
+    if not callable(getattr(mod, "signal", None)) and not callable(getattr(mod, "signals", None)):
+        raise ValueError("В файле нет функции signal(candles, p) или signals(candles, p)")
     if not isinstance(getattr(mod, "NAME", None), str) or not mod.NAME.strip():
         raise ValueError("Задайте название сигнала: NAME = \"...\"")
     params = getattr(mod, "PARAMS", {})
@@ -271,9 +287,32 @@ def dry_run(mod) -> str:
         price *= math.exp(rnd.gauss(0, 0.004))
         h, l = max(o, price) * (1 + abs(rnd.gauss(0, 0.002))), min(o, price) * (1 - abs(rnd.gauss(0, 0.002)))
         rows.append([k * 60_000, o, h, l, price, rnd.uniform(1, 100)])
-    res = run(mod, rows, dict(getattr(mod, "PARAMS", {})), "<проверка>")
+    params = dict(getattr(mod, "PARAMS", {}))
+    res = run(mod, rows, params, "<проверка>")
     n = sum(1 for r in res if r)
+    if callable(getattr(mod, "signals", None)):
+        # signals видит все свечи сразу и может нечаянно заглянуть вперёд. Проверяем: ответ
+        # для свечи i не должен меняться, если свечей после неё ещё нет — как вживую.
+        hits = [i for i, r in enumerate(res) if r][:30]
+        for i in sorted(set(hits + rnd.sample(range(len(rows)), 20))):
+            alone = run(mod, rows[:i + 1], params, "<проверка>")[i]
+            if not _same(alone, res[i]):
+                raise ValueError(f"Сигнал заглядывает в будущее: на свече {i + 1} ответ «{_brief(res[i])}», а если "
+                                 f"следующих свечей ещё нет — «{_brief(alone)}». Вживую будет второй вариант, "
+                                 f"поэтому проверка на истории врала бы. Элемент i должен зависеть только от свечей 0..i")
     return f"На 2000 пробных свечах сигнал сработал {n} раз, ошибок нет"
+
+
+def _same(a: Optional[dict], b: Optional[dict]) -> bool:
+    if not a or not b:
+        return not a and not b
+    return a["side"] == b["side"] and all(
+        (a.get(k) is None) == (b.get(k) is None) and (a.get(k) is None or math.isclose(a[k], b[k], rel_tol=1e-9))
+        for k in ("stop", "take"))
+
+
+def _brief(r: Optional[dict]) -> str:
+    return "нет сигнала" if not r else r["side"] + "".join(f", {k} {r[k]:g}" for k in ("stop", "take") if k in r)
 
 
 # ---------- прогон ----------
@@ -283,8 +322,23 @@ def run(mod, ohlcv: List[list], params: Dict[str, float], filename: Optional[str
     filename = filename or getattr(mod, "__file__", "")
     data = [Candle(int(c[0]), float(c[1]), float(c[2]), float(c[3]), float(c[4]), float(c[5])) for c in ohlcv]
     warm = int(getattr(mod, "WARMUP", 50))
-    fn = mod.signal
     out: List[Optional[dict]] = [None] * len(data)
+    if callable(getattr(mod, "signals", None)):  # весь ряд за один вызов
+        try:
+            res = mod.signals(Candles(data, len(data)), params)
+            res = list(res)
+        except Exception as e:
+            raise ValueError(f"Сигнал упал — {_where(e, filename)}")
+        if len(res) != len(data):
+            raise ValueError(f"signals вернула {len(res)} ответов на {len(data)} свечей — нужно по одному на свечу")
+        for i in range(warm - 1, len(data)):
+            if res[i]:
+                try:
+                    out[i] = _result(res[i], data[i].close)
+                except ValueError as e:
+                    raise ValueError(f"Свеча {i + 1}: {e}")
+        return out
+    fn = mod.signal
     view = Candles(data, 0)
     for i in range(warm - 1, len(data)):
         view._n = i + 1

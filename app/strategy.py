@@ -183,6 +183,29 @@ TUNED_BOTS = [
         "params": {**_NO_DCA, "direction": "long", "take_profit_pct": 1.2, "stop_loss_pct": 0,
                    "rules": _sets(long=[_c(RSI14, "below", 30), _c(PRICE, "above", _EMA200)])},
     },
+] + [
+    # Сигналы-скрипты из data/signals (примеры из app/signals_examples). Лучший вариант каждой
+    # стратегии на истории за 3 года (октябрь 2023 — октябрь 2026), BTC/USDT и ETH/USDT,
+    # свечи 1h и 4h, спот и фьючерсы. Стоп и тейк ставит сам сигнал, настройки — по умолчанию.
+    # За эти 3 года BTC вырос на 210%, ETH — на 61%: простое удержание ни одна не обогнала.
+    {
+        "name": f"Подобран: {title}", "symbol": symbol, "timeframe": tf, "market": market, "about": about,
+        "params": {**_NO_DCA, "signal": "script", "script": script,
+                   "direction": "long" if market == "spot" else "both",
+                   "take_profit_pct": 0, "stop_loss_pct": 0},
+    }
+    for title, script, symbol, tf, market, about in [
+        ("Liquidity Sweep BTC 4h фьючерсы", "liquidity_sweep", "BTC/USDT", "4h", "futures",
+         "3 года +38,0% (по годам +21,9 / +9,4 / +6,8); просадка 8%, 31 сделка. На ETH та же стратегия в минусе."),
+        ("Liquidity Sweep BTC 4h спот", "liquidity_sweep", "BTC/USDT", "4h", "spot",
+         "3 года +33,1% (по годам +17,5 / +11,8 / +3,8); просадка 5%, 16 сделок."),
+        ("SMC ETH 1h фьючерсы", "smc_sweep_mss_fvg", "ETH/USDT", "1h", "futures",
+         "3 года +53,6% (по годам +22,5 / +4,1 / +27,0); просадка 15%, 43 сделки. На BTC 1h фьючерсах в минусе."),
+        ("EMA+ADX+VWAP BTC 4h спот", "ema_adx_vwap", "BTC/USDT", "4h", "spot",
+         "3 года +70,1% (по годам +55,9 / +29,9 / −15,7); просадка 20%, 76 сделок. Последний год в минусе."),
+        ("Multi-Regime ETH 4h спот", "multi_regime", "ETH/USDT", "4h", "spot",
+         "3 года +43,7% (по годам +32,8 / +32,7 / −21,8); просадка 27%, 96 сделок. Последний год в минусе."),
+    ]
 ]
 
 SYMBOL_RE = re.compile(r"^[A-Z0-9]{2,15}/[A-Z0-9]{2,10}$")

@@ -253,7 +253,7 @@ pre.logs { white-space: pre-wrap; font-size: 13px; line-height: 1.55; margin: 0;
     <div class="top-actions">
       <button class="btn" id="sigBtn" title="Свои сигналы на входе — небольшие скрипты на Python">Сигналы</button>
       <button class="btn" id="tgBtn">Telegram</button>
-      <button class="btn" id="tunedBots" title="Бумажные боты с настройками, подобранными по истории BTC/USDT за год">Лучшие боты</button>
+      <button class="btn" id="tunedBots" title="Бумажные боты с настройками, подобранными по истории">Лучшие боты</button>
       <button class="btn primary" id="newBot">Новый бот</button>
     </div>
   </div>
@@ -464,7 +464,7 @@ pre.logs { white-space: pre-wrap; font-size: 13px; line-height: 1.55; margin: 0;
       </div>
       <div id="sigEditBox" hidden>
         <h3 id="sigEditTitle" style="margin:18px 0 0">Новый сигнал</h3>
-        <p class="hint">Нужны <code>NAME</code> и <code>def signal(candles, p)</code>. <code>candles[-1]</code> — свеча, которая только что закрылась (<code>.open .high .low .close .volume .time</code>). Вернуть <code>None</code>, <code>"long"</code>, <code>"short"</code> или <code>{"side": "long", "stop": цена, "take": цена, "why": "текст"}</code>. Настройки из <code>PARAMS</code> появятся в редакторе бота, комментарий после значения станет подписью. Свечи бот берёт с Binance сам: <code>ccxt</code>, циклы и <code>print</code> из готовых скриптов не нужны, <code>pandas</code> в программе нет.</p>
+        <p class="hint">Нужны <code>NAME</code> и <code>def signal(candles, p)</code>. <code>candles[-1]</code> — свеча, которая только что закрылась (<code>.open .high .low .close .volume .time</code>). Вернуть <code>None</code>, <code>"long"</code>, <code>"short"</code> или <code>{"side": "long", "stop": цена, "take": цена, "why": "текст"}</code>. Если сигнал считает индикаторы, удобнее <code>def signals(candles, p)</code>: один вызов на все свечи, вернуть список ответов по одному на свечу (ответ для свечи i — только по свечам 0..i; готовые индикаторы: <code>from app import indicators</code>). Настройки из <code>PARAMS</code> появятся в редакторе бота, комментарий после значения станет подписью. Свечи бот берёт с Binance сам: <code>ccxt</code>, циклы и <code>print</code> из готовых скриптов не нужны, <code>pandas</code> в программе нет.</p>
         <div class="sig-bar">
           <button type="button" class="btn" id="sigFileBtn">Загрузить файл .py</button>
           <input type="file" id="sigFile" accept=".py,text/x-python,text/plain" hidden>
@@ -776,15 +776,19 @@ $("#newBot").onclick = () => openEditor(null);
 $("#tunedBots").onclick = e => createTunedBots(e.currentTarget);
 
 async function createTunedBots(btn) {
-  if (!confirm("Создать бумажных ботов BTC/USDT с настройками, которые лучше всего показали себя " +
-               "на истории за год (октябрь 2025 — октябрь 2026)? Боты появятся остановленными, " +
-               "результат на истории — в «Проверить на истории». Уже созданные не повторятся.")) return;
+  const have = new Set(S.bots.map(b => b.name));
+  const todo = S.meta.tuned.filter(t => !have.has(t.name));
+  if (!todo.length) return toast("Все эти боты уже есть в списке");
+  if (!confirm("Создать бумажных ботов с настройками, которые лучше всего показали себя на истории? " +
+               "Они появятся остановленными; уже созданные не повторятся.\n\n" +
+               todo.map(t => `• ${t.name.replace("Подобран: ", "")} — ${t.about}`).join("\n"))) return;
   btn.disabled = true;
   try {
     const r = await api("/api/bots/tuned", { method: "POST" });
-    toast(r.created.length
+    const fail = r.failed?.length ? ` Не создались: ${r.failed.join("; ")}` : "";
+    toast((r.created.length
       ? `Создано ботов: ${r.created.length}. Запустите их, когда будете готовы.`
-      : "Эти боты уже есть в списке");
+      : "Новых ботов нет.") + fail, !!fail);
     await loadBots(true);
   } catch (err) { toast(err.message, true); }
   btn.disabled = false;

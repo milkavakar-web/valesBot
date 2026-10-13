@@ -120,3 +120,90 @@ def volume_ratio(volume: List[float], n: int) -> Series:
             out[i] = volume[i] * n / s
         s += volume[i] - volume[i - n]
     return out
+
+
+def true_range(high: List[float], low: List[float], close: List[float]) -> List[float]:
+    return [high[0] - low[0]] + [max(high[i] - low[i], abs(high[i] - close[i - 1]), abs(low[i] - close[i - 1]))
+                                 for i in range(1, len(close))]
+
+
+def _wilder(values: List[float], period: int, start: int = 0) -> Series:
+    """Сглаживание Уайлдера (RMA, как ta.rma в TradingView) начиная с индекса start."""
+    out: Series = [None] * len(values)
+    if period < 1 or len(values) - start < period:
+        return out
+    s = sum(values[start:start + period]) / period
+    out[start + period - 1] = s
+    for i in range(start + period, len(values)):
+        s = (s * (period - 1) + values[i]) / period
+        out[i] = s
+    return out
+
+
+def atr(high: List[float], low: List[float], close: List[float], period: int) -> Series:
+    """Средний истинный диапазон (ATR) по Уайлдеру, как ta.atr в TradingView."""
+    return _wilder(true_range(high, low, close), period)
+
+
+def adx(high: List[float], low: List[float], close: List[float], period: int) -> Tuple[Series, Series, Series]:
+    """ADX, +DI и −DI по Уайлдеру, как ta.dmi в TradingView."""
+    n = len(close)
+    plus_dm, minus_dm = [0.0] * n, [0.0] * n
+    for i in range(1, n):
+        up, down = high[i] - high[i - 1], low[i - 1] - low[i]
+        plus_dm[i] = up if up > down and up > 0 else 0.0
+        minus_dm[i] = down if down > up and down > 0 else 0.0
+    tr = _wilder(true_range(high, low, close), period, 1)
+    pdm, mdm = _wilder(plus_dm, period, 1), _wilder(minus_dm, period, 1)
+    pdi: Series = [None] * n
+    mdi: Series = [None] * n
+    dx = [0.0] * n
+    first = None
+    for i in range(n):
+        if tr[i]:
+            pdi[i], mdi[i] = 100 * pdm[i] / tr[i], 100 * mdm[i] / tr[i]
+            s = pdi[i] + mdi[i]
+            dx[i] = 100 * abs(pdi[i] - mdi[i]) / s if s else 0.0
+            first = i if first is None else first
+    out = _wilder(dx, period, first) if first is not None else [None] * n
+    return out, pdi, mdi
+
+
+def vwap(time: List[int], high: List[float], low: List[float], close: List[float],
+         volume: List[float], anchor_ms: int = 86_400_000) -> Series:
+    """VWAP с начала периода (по умолчанию — суток UTC), как ta.vwap в TradingView."""
+    out: Series = [None] * len(close)
+    pv = vol = 0.0
+    period = None
+    for i in range(len(close)):
+        p = time[i] // anchor_ms
+        if p != period:
+            period, pv, vol = p, 0.0, 0.0
+        tp = (high[i] + low[i] + close[i]) / 3
+        pv += tp * volume[i]
+        vol += volume[i]
+        out[i] = pv / vol if vol else tp
+    return out
+
+
+def highest(values: List[float], n: int) -> Series:
+    """Максимум за n свечей, включая текущую."""
+    return [None if i < n - 1 else max(values[i - n + 1:i + 1]) for i in range(len(values))]
+
+
+def lowest(values: List[float], n: int) -> Series:
+    """Минимум за n свечей, включая текущую."""
+    return [None if i < n - 1 else min(values[i - n + 1:i + 1]) for i in range(len(values))]
+
+
+def pivots(values: List[float], left: int, right: int, high: bool) -> List[Optional[Tuple[int, float]]]:
+    """Подтверждённые экстремумы (как ta.pivothigh / ta.pivotlow): в элементе i — экстремум,
+    который стал известен на свече i (он сам был right свечей назад), в виде (индекс, цена)."""
+    out: List[Optional[Tuple[int, float]]] = [None] * len(values)
+    for i in range(left + right, len(values)):
+        j = i - right
+        v = values[j]
+        window = values[j - left:j] + values[j + 1:i + 1]
+        if (high and all(v > w for w in window)) or (not high and all(v < w for w in window)):
+            out[i] = (j, v)
+    return out

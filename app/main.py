@@ -148,6 +148,7 @@ async def meta():
         "indicators": rules.catalog_api(),  # из этого описания панель строит конструктор условий
         "ops": [{"id": k, "name": v} for k, v in rules.OPS.items()],
         "presets": PRESETS,
+        "tuned": [{"name": t["name"], "about": t["about"]} for t in TUNED_BOTS],
         "scripts": [s.info() for s in scripts.all_scripts()],
         "scripts_editable": scripts.editable(),
         "script_template": scripts.TEMPLATE,
@@ -234,13 +235,19 @@ async def create_tuned_bots():
     """Бумажные боты с настройками, подобранными по истории (strategy.TUNED_BOTS).
     Бот с таким же именем уже есть — пропускаем, чтобы повторное нажатие не плодило копии."""
     have = {b["name"] for b in db.list_bots()}
-    created = []
+    created, failed = [], []
     for t in TUNED_BOTS:
         if t["name"] in have:
             continue
-        bot_id = db.create_bot(normalize_bot({**t, "mode": "paper"}))
+        try:  # бот на сигнале-скрипте не создастся, если файл сигнала удалён из data/signals
+            bot = normalize_bot({**t, "mode": "paper"})
+        except ValueError as e:
+            failed.append(f"{t['name']}: {e}")
+            continue
+        bot_id = db.create_bot(bot)
         created.append(_view(db.get_bot(bot_id)))
-    return {"created": created, "skipped": len(TUNED_BOTS) - len(created)}
+    return {"created": created, "failed": failed,
+            "skipped": len(TUNED_BOTS) - len(created) - len(failed)}
 
 
 @app.put("/api/bots/{bot_id}")
